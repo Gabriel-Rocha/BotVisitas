@@ -1,0 +1,16 @@
+{
+  "name": "getvisits",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "https-proxy-agent": "^7.0.2",
+    "node-fetch": "^2.7.0",
+    "puppeteer": "^21.3.6"
+  }
+}
