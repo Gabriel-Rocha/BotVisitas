@@ -2,15 +2,10 @@ const puppeteer = require('puppeteer');
 
 const urls = [
   //adsterra
-  'https://gabriel-rocha.github.io/ads.html',
   'https://www.highcpmrevenuegate.com/ijanywbcx?key=afc18ac98661d4ce908fb577d6329cf4',
-  'https://gabriel-rocha.github.io/ads2.html',
   'https://www.highcpmrevenuegate.com/ssn2stu0?key=fe6f57058786d13b1e1b3f3dc6bfcbb9',
-  'https://gabriel-rocha.github.io/ads3.html',
   'https://www.highcpmrevenuegate.com/y5rthu80d?key=a80bd46037dcfb8c5a56907a82e4e850',
-  'https://gabriel-rocha.github.io/ads4.html',
   'https://www.highcpmrevenuegate.com/hgrhpa17?key=8a376d3e507fc56a76daf9ca63f3294d',
-  'https://gabriel-rocha.github.io/ads5.html',
   'https://www.highcpmrevenuegate.com/iiiw1zn27a?key=7fa6f5ae755a15fc5c159b77b4602c41',
   'https://www.highcpmrevenuegate.com/adgu51m44?key=8aeeec5d84a5be1aa6e98154e795d130',
   'https://www.highcpmrevenuegate.com/iv25c2mtj?key=d2c91fe22d26270dd7dd403464bf5227',
@@ -24,7 +19,7 @@ const urls = [
   "https://www.highcpmrevenuegate.com/i1nw65r6x?key=7342a536c2b806030599f926f0af654d"
 ];
 
-const intervaloEntreAcessos = 2000;
+const intervaloEntreAcessos = 1000;
 const maxCliquesPorPagina = 15;
 
 const userAgents = [
