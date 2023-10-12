@@ -17,6 +17,11 @@ const urls = [
   'https://www.highcpmrevenuegate.com/p7zzca3m1?key=7b912895f148dba099a1aae2d07cb41f',
   'https://www.highcpmrevenuegate.com/v7ai60g4cp?key=5e827f600cec91c7f16ba17e00f24b94',
   'https://www.highcpmrevenuegate.com/i2a1b789h4?key=d916be92e7ab83e4d81b565aa6ec615f',
+  'https://www.highcpmrevenuegate.com/r4ncmvqv9?key=282473cce469f7f11108ea96ba14fdf6',
+  'https://www.highcpmrevenuegate.com/usd0wrn0?key=b142159adf737e1113f2eb376ee20655',
+  'https://www.highcpmrevenuegate.com/hk53b9cm?key=214bf199157175a813d07859378dc5c5',
+  'https://www.highcpmrevenuegate.com/nncnqbkiv?key=6b076955204f382d9e209d35c4a17159',
+  "https://www.highcpmrevenuegate.com/i1nw65r6x?key=7342a536c2b806030599f926f0af654d"
 ];
 
 const intervaloEntreAcessos = 2000;
