@@ -1,25 +1,10 @@
 const puppeteer = require('puppeteer');
 
 const urls = [
-  //adsterra
-  'https://www.highcpmrevenuegate.com/ijanywbcx?key=afc18ac98661d4ce908fb577d6329cf4',
-  'https://www.highcpmrevenuegate.com/ssn2stu0?key=fe6f57058786d13b1e1b3f3dc6bfcbb9',
-  'https://www.highcpmrevenuegate.com/y5rthu80d?key=a80bd46037dcfb8c5a56907a82e4e850',
-  'https://www.highcpmrevenuegate.com/hgrhpa17?key=8a376d3e507fc56a76daf9ca63f3294d',
-  'https://www.highcpmrevenuegate.com/iiiw1zn27a?key=7fa6f5ae755a15fc5c159b77b4602c41',
-  'https://www.highcpmrevenuegate.com/adgu51m44?key=8aeeec5d84a5be1aa6e98154e795d130',
-  'https://www.highcpmrevenuegate.com/iv25c2mtj?key=d2c91fe22d26270dd7dd403464bf5227',
-  'https://www.highcpmrevenuegate.com/p7zzca3m1?key=7b912895f148dba099a1aae2d07cb41f',
-  'https://www.highcpmrevenuegate.com/v7ai60g4cp?key=5e827f600cec91c7f16ba17e00f24b94',
-  'https://www.highcpmrevenuegate.com/i2a1b789h4?key=d916be92e7ab83e4d81b565aa6ec615f',
-  'https://www.highcpmrevenuegate.com/r4ncmvqv9?key=282473cce469f7f11108ea96ba14fdf6',
-  'https://www.highcpmrevenuegate.com/usd0wrn0?key=b142159adf737e1113f2eb376ee20655',
-  'https://www.highcpmrevenuegate.com/hk53b9cm?key=214bf199157175a813d07859378dc5c5',
-  'https://www.highcpmrevenuegate.com/nncnqbkiv?key=6b076955204f382d9e209d35c4a17159',
-  "https://www.highcpmrevenuegate.com/i1nw65r6x?key=7342a536c2b806030599f926f0af654d"
+  // Adicione suas URLs aqui
+  'https://www.toprevenuegate.com/gdc7b45t?key=5d4c01a272248790f8e17c7c266b78ac'
 ];
 
-const intervaloEntreAcessos = 1000;
 const maxCliquesPorPagina = 15;
 
 const userAgents = [
@@ -63,9 +48,10 @@ async function simularAcesso() {
           await page.mouse.click(x, y);
         }
 
-        // Aguarde o intervalo definido até o próximo acesso
-        console.log(`Aguardando ${intervaloEntreAcessos / 1000} segundos até o próximo acesso...`);
-        await page.waitForTimeout(intervaloEntreAcessos);
+        // Gera um intervalo aleatório entre 1 minuto (60 segundos) e 60 minutos (3600 segundos)
+        const intervaloAleatorio = Math.floor(Math.random() * 3540) + 60;
+        console.log(`Aguardando ${intervaloAleatorio} segundos até o próximo acesso...`);
+        await page.waitForTimeout(intervaloAleatorio * 1000);
       } catch (error) {
         // Captura o erro e continua a execução do código
         console.log(`Ocorreu um erro ao acessar a página: ${url}`);
