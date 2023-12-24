@@ -1,14 +1,10 @@
 const puppeteer = require('puppeteer');
 
 const urls = [
-  //adsterra
-  'https://www.toprevenuegate.com/aqckfn4yte?key=cc3f70950c49a99f3c5609269a7c2a81',
-  'https://www.toprevenuegate.com/jpf1nzfs?key=ac246a599263801f79f6c061ee746c03',
-  'https://www.toprevenuegate.com/fmrtjv6n3d?key=3de25564a26e613023c227eafede68ce',
-  'https://www.toprevenuegate.com/mhamjsnk8j?key=351da3598d4a7a1abc28bb3ff95c5eb7'
+  // Adicione suas URLs aqui
+  'https://www.toprevenuegate.com/t7ub7j14r?key=dc75d3afad8a6e3edf3f40e3cd753a71'
 ];
 
-const intervaloEntreAcessos = 1000;
 const maxCliquesPorPagina = 15;
 
 const userAgents = [
@@ -17,6 +13,9 @@ const userAgents = [
   'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36',
   'Mozilla/5.0 (iPad; CPU OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/16.16299',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/100.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Safari/14.0.3',
 ];
 
 function getRandomUserAgent() {
@@ -27,6 +26,7 @@ function getRandomUserAgent() {
 async function simularAcesso() {
   const browser = await puppeteer.launch({
     headless: true,
+    executablePath: '/usr/bin/chromium', // Caminho para o Chromium
     args: ['--no-sandbox'],
   });
 
@@ -56,8 +56,8 @@ async function simularAcesso() {
           await page.mouse.click(x, y);
         }
 
-        // Gera um intervalo aleatório entre 1 minuto (60 segundos) e 5 minutos (300 segundos)
-        const intervaloAleatorio = Math.floor(Math.random() * 240) + 60;
+        // Gera um intervalo aleatório entre 1 minuto (60 segundos) e 60 minutos (3600 segundos)
+        const intervaloAleatorio = Math.floor(Math.random() * 3540) + 60;
         console.log(`Aguardando ${intervaloAleatorio} segundos até o próximo acesso...`);
         await page.waitForTimeout(intervaloAleatorio * 1000);
       } catch (error) {
