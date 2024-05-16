@@ -13,6 +13,8 @@
     "node-fetch": "^2.7.0",
     "ps-list": "^8.1.1",
     "ps-tree": "^1.2.0",
-    "puppeteer": "^21.6.1"
+    "puppeteer": "^21.11.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }

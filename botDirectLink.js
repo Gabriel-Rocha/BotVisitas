@@ -1,4 +1,7 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+puppeteer.use(StealthPlugin());
 
 const urls = [
   'https://www.highcpmgate.com/iftxfkbw?key=2e7874598a1f5a01096a75b6fd2d6689'
