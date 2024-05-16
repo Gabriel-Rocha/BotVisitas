@@ -151,7 +151,7 @@ async function simularAcesso() {
         }
 
         // Gera um intervalo aleatório entre 1 minuto (60 segundos) e 60 minutos (3600 segundos)
-        const intervaloAleatorio = Math.floor(Math.random() * 3540) + 60;
+        const intervaloAleatorio = Math.floor(Math.random() * 840) + 60;
         console.log(`Aguardando ${intervaloAleatorio} segundos até o próximo acesso...`);
         await page.waitForTimeout(intervaloAleatorio * 1000);
       } catch (error) {
