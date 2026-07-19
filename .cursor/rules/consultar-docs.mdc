@@ -1,0 +1,20 @@
+---
+description: Sempre consultar a documentação de refatoração antes de alterar o projeto
+alwaysApply: true
+---
+
+# Contexto obrigatório — BotVisitas
+
+Antes de qualquer mudança de código, leia e siga:
+
+1. `docs/REFACTOR_CHECKLIST.md` — fonte da verdade do que fazer / o que já foi feito
+2. `docs/00-contexto.md` — o que o projeto é e o que NÃO é
+3. `docs/01-arquitetura.md` — estrutura alvo e responsabilidades
+
+## Regras
+
+- Não inventar pastas ou módulos fora do que está documentado
+- Marcar itens do checklist ao concluir (`[ ]` → `[x]`)
+- Preferir docs curtos a reler o código legado inteiro
+- Secrets e URLs de campanha ficam em `config/` / `.env`, nunca hardcoded
+- Responder sempre em português
