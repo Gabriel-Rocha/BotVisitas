@@ -53,6 +53,8 @@ function loadConfig() {
     targetUrls: parseUrls(process.env.TARGET_URLS),
     maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 15),
     includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
+    clickSelector: (process.env.CLICK_SELECTOR || '').trim() || null,
+    targetAllowHosts: parseUrls(process.env.TARGET_ALLOW_HOSTS),
 
     proxy: {
       enabled: bool(process.env.PROXY_ENABLED, false),

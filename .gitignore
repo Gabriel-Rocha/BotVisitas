@@ -39,6 +39,11 @@ Desktop.ini
 *.swo
 *~
 
+# Ferramentas locais (BMAD / assistentes) — ambiente local, não versionar
+.claude/
+.cursor/_bmad/
+_bmad/
+
 # Testes / coverage
 coverage/
 .nyc_output/

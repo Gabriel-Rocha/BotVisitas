@@ -10,6 +10,9 @@ Documentação enxuta para reduzir tokens e manter coerência na refatoração.
 4. [02-estado-atual.md](./02-estado-atual.md)
 5. [03-estrutura-pastas.md](./03-estrutura-pastas.md)
 6. [04-convencoes.md](./04-convencoes.md)
+7. [05-referencia-tecnica.md](./05-referencia-tecnica.md) ← referência completa (módulos, config, fluxo)
+8. [06-red-team-harness.md](./06-red-team-harness.md) ← harness de cobertura de detecção (teste defensivo autorizado)
+9. **[07-clausula-petrea.md](./07-clausula-petrea.md)** ← ⚖️ FUNDACIONAL: cláusula pétrea (uso defensivo, só infra sua) + registro de alterações
 
 ## Regra
 

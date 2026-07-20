@@ -7,6 +7,9 @@
     "start": "node src/index.js",
     "start:dry": "node -e \"process.env.STRATEGY='dryRun';require('./src/index.js')\"",
     "start:headed": "node -e \"process.env.HEADLESS='false';require('./src/index.js')\"",
+    "redteam": "node src/redteam/index.js",
+    "redteam:headed": "node -e \"process.env.HEADLESS='false';require('./src/redteam/index.js')\"",
+    "test:server": "node scripts/test-server.js",
     "browsers:install": "npx puppeteer browsers install chrome",
     "postinstall": "npx puppeteer browsers install chrome || true"
   },
