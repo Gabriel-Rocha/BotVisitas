@@ -4,11 +4,14 @@
 
 ```
 BotVisitas/
+├── Dockerfile              # imagem Node + Chromium
+├── docker-compose.yml      # forma padrão de execução
+├── .dockerignore
 ├── docs/
 ├── config/                 # overrides locais (opcional)
-├── logs/                   # gitignored
+├── logs/                   # gitignored (volume no Docker)
 ├── scripts/
-│   └── start.sh
+│   └── start.sh            # atalho → docker compose up
 ├── src/
 │   ├── index.js            # entrypoint
 │   ├── config/index.js
