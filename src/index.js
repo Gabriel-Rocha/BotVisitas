@@ -1,24 +1,13 @@
 'use strict';
 
+const { createBotSession } = require('./app/runBot');
+const { createBufferedLogger } = require('./dashboard/bufferedLogger');
 const { loadConfig } = require('./config');
-const { createLogger } = require('./utils/logger');
-const { resolveStrategy } = require('./strategies');
-const { createLoop } = require('./core/loop');
 
 async function main() {
   const config = loadConfig();
-  const logger = createLogger(config.logLevel);
-  const strategy = resolveStrategy(config.strategy);
-
-  logger.info('BotVisitas v2 — start');
-  logger.info(`Node ${process.version} | platform=${process.platform} | arch=${process.arch}`);
-  logger.info(`strategy=${config.strategy} | headless=${config.headless} | proxy=${config.proxy.enabled}`);
-
-  if (config.strategy === 'directLink') {
-    logger.warn('Direct Link ativo — links podem estar propositalmente inativos.');
-  }
-
-  const loop = createLoop({ config, strategy, logger });
+  const logger = createBufferedLogger(config.logLevel);
+  const { loop } = createBotSession({ logger });
 
   const shutdown = async (signal) => {
     logger.info(`Sinal ${signal} recebido`);

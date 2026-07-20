@@ -12,6 +12,7 @@ Forma **padrão** de rodar o projeto: sempre no container.
 ```bash
 cp .env.example .env   # se ainda não tiver
 docker compose up -d --build
+# Dashboard: http://localhost:3847
 docker compose logs -f bot
 ```
 
@@ -30,7 +31,8 @@ npm run docker:down    # para e remove o container
 | Base | `node:20-bookworm-slim` |
 | Browser | Chromium do Debian (`/usr/bin/chromium`) |
 | User | `bot` (não-root) |
-| Entrypoint | `npm start` → `src/index.js` |
+| Entrypoint | `node src/dashboard/server.js` (API + UI) |
+| Porta | `3847` |
 | Logs | volume `./logs` → `/app/logs` |
 | Restart | `unless-stopped` |
 | shm | 2 GB (evita crash do Chrome) |

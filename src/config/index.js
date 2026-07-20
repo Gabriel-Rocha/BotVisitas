@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
+const { parseProxyList, FREE_PLAN_MAX } = require('../core/proxy');
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
@@ -44,6 +45,8 @@ function loadConfig() {
     intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 60),
     intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 900),
     browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 20),
+    // Workers paralelos (default 5). Com proxy: teto = pool ≤ 10.
+    concurrency: int(process.env.CONCURRENCY, 5),
 
     viewport: {
       width: int(process.env.VIEWPORT_WIDTH, 1920),
@@ -58,7 +61,10 @@ function loadConfig() {
 
     proxy: {
       enabled: bool(process.env.PROXY_ENABLED, false),
+      list: parseProxyList(process.env.PROXY_LIST || ''),
       server: (process.env.PROXY_SERVER || '').trim() || null,
+      maxProxies: Math.min(int(process.env.PROXY_MAX, FREE_PLAN_MAX), FREE_PLAN_MAX),
+      rotate: (process.env.PROXY_ROTATE || 'roundRobin').trim(),
     },
 
     userAgents,

@@ -5,6 +5,9 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "dashboard": "node src/dashboard/server.js",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
     "start:dry": "node -e \"process.env.STRATEGY='dryRun';require('./src/index.js')\"",
     "start:headed": "node -e \"process.env.HEADLESS='false';require('./src/index.js')\"",
     "redteam": "node src/redteam/index.js",
@@ -20,11 +23,12 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["puppeteer", "bot", "visits"],
+  "keywords": ["puppeteer", "bot", "visits", "dashboard"],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.7",
+    "express": "^5.1.0",
     "puppeteer": "^21.11.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"

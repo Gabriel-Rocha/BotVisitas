@@ -12,14 +12,18 @@ BotVisitas/
 ├── logs/                   # gitignored (volume no Docker)
 ├── scripts/
 │   └── start.sh            # atalho → docker compose up
+├── web/                    # React + Vite (dashboard)
 ├── src/
-│   ├── index.js            # entrypoint
+│   ├── index.js            # CLI entrypoint
+│   ├── dashboard/          # Express API + botRuntime
+│   ├── app/runBot.js       # sessão reutilizável
 │   ├── config/index.js
 │   ├── core/
 │   │   ├── browser.js
 │   │   ├── session.js
-│   │   ├── loop.js
-│   │   └── proxy.js        # stub (PROXY_ENABLED=false)
+│   │   ├── worker.js       # 1 Chromium + 1 proxy
+│   │   ├── loop.js         # orquestra N workers
+│   │   └── proxy.js        # lease exclusivo (máx. 10)
 │   ├── strategies/
 │   │   ├── index.js        # registry
 │   │   ├── dryRun.js       # DEFAULT

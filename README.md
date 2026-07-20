@@ -25,12 +25,21 @@ Regra completa e **imutável**: [`docs/07-clausula-petrea.md`](docs/07-clausula-
 ```bash
 cp .env.example .env
 docker compose up -d --build
+# Dashboard: http://localhost:3847
 docker compose logs -f bot
 ```
 
-Ou: `npm run docker:up` → `npm run docker:logs`.
+Ou: `npm run docker:up` → abra o painel em `:3847`.
 
-Default: `STRATEGY=dryRun`. Detalhes: [`docs/08-docker.md`](docs/08-docker.md).
+Default bot: `STRATEGY=dryRun`. Docs: [`docs/08-docker.md`](docs/08-docker.md) · [`docs/10-dashboard.md`](docs/10-dashboard.md).
+
+## Dashboard (local sem Docker)
+
+```bash
+npm install
+npm run web:build
+npm run dashboard          # http://127.0.0.1:3847
+```
 
 ## Setup local (sem Docker)
 
@@ -44,7 +53,10 @@ npm start
 
 | Comando | O que faz |
 |---------|-----------|
-| `npm run docker:up` | Build + sobe o bot no container |
+| `npm run dashboard` | Sobe API + UI em `:3847` |
+| `npm run web:dev` | Vite hot-reload (proxy `/api`) |
+| `npm run web:build` | Build do frontend → `web/dist` |
+| `npm run docker:up` | Build + sobe o container (dashboard) |
 | `npm run docker:logs` | Logs do container |
 | `npm run docker:down` | Para o container |
 | `npm run docker:restart` | Reinicia o container |
@@ -97,14 +109,21 @@ npm run redteam:headed   # com janela, p/ ver L0 robótico → L3/L4 humanizado
 
 Detalhes: [`docs/06-red-team-harness.md`](docs/06-red-team-harness.md).
 
-## Proxies
+## Proxies e concorrência
 
-Preparados na config (`PROXY_ENABLED` / `PROXY_SERVER`), **desligados** por custo.
-Ver `src/core/proxy.js`.
+Plano free Webshare (máx. 10) + workers paralelos — ver [`docs/09-proxies-webshare.md`](docs/09-proxies-webshare.md).
+
+```env
+PROXY_ENABLED=true
+CONCURRENCY=5          # cada worker = 1 Chromium + 1 IP exclusivo
+```
+
+`directLink` sem proxy força `CONCURRENCY=1`. RAM: ~150–300MB por Chromium.
 
 ## Documentação
 
 - ⚖️ **[`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md)** — fundacional (uso + registro de alterações)
+- [`docs/10-dashboard.md`](docs/10-dashboard.md) — painel web de operação
 - [`docs/08-docker.md`](docs/08-docker.md) — rodar sempre no container
 - [`docs/05-referencia-tecnica.md`](docs/05-referencia-tecnica.md) — referência técnica completa
 - [`docs/06-red-team-harness.md`](docs/06-red-team-harness.md) — o harness de detecção
@@ -115,15 +134,17 @@ Ver `src/core/proxy.js`.
 
 ```
 src/
-  index.js          # entrypoint (loop + strategies)
+  index.js          # CLI entrypoint (loop)
+  dashboard/        # API Express + botRuntime
   config/           # env → config
-  core/             # browser, session, loop, proxy stub
+  core/             # browser, session, worker, loop, proxy lease
   strategies/       # dryRun (default), directLink
-  redteam/          # harness de cobertura de detecção (npm run redteam)
+  redteam/          # harness de cobertura de detecção
   data/             # UAs, referrers
   utils/            # logger, random, sleep
+web/                # React + Vite (dashboard UI)
 scripts/
-  test-server.js    # página de teste local :3000 (npm run test:server)
+  test-server.js    # página de teste local :3000
 ```
 
 ## Colaborando
