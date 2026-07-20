@@ -278,8 +278,12 @@ export default function App() {
                 <input
                   value={config.TARGET_URLS}
                   onChange={(e) => updateField('TARGET_URLS', e.target.value)}
-                  placeholder="só infra sua"
+                  placeholder="só infra sua — salve ou edite o .env e dê Start"
                 />
+                <p className="muted">
+                  O Start relê o .env do disco. Se editar o arquivo fora daqui, não clique em
+                  Salvar com o campo antigo — isso sobrescreve o arquivo.
+                </p>
               </div>
               <div className="field">
                 <label>CLICK_SELECTOR</label>

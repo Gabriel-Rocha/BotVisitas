@@ -14,7 +14,8 @@
 const http = require('http');
 
 const PORT = Number.parseInt(process.env.TEST_SERVER_PORT, 10) || 3000;
-const HOST = '127.0.0.1';
+// Escuta em 0.0.0.0 para o container Docker alcançar via host.docker.internal
+const HOST = process.env.TEST_SERVER_HOST || '0.0.0.0';
 
 const PAGE = `<!doctype html>
 <html lang="pt-BR">

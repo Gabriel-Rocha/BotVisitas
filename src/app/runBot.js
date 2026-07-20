@@ -19,6 +19,11 @@ function createBotSession({ logger } = {}) {
   log.info(
     `strategy=${config.strategy} | headless=${config.headless} | proxy=${config.proxy.enabled} | concurrency=${config.concurrency}`
   );
+  log.info(
+    `TARGET_URLS (${config.targetUrls.length}): ${
+      config.targetUrls.length ? config.targetUrls.join(' | ') : '(vazio)'
+    }`
+  );
 
   if (config.strategy === 'directLink') {
     log.warn('Direct Link ativo — use apenas contra infra que você controla.');
