@@ -1,0 +1,21 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: botvisitas
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Garante Chromium do container mesmo se .env estiver vazio
+      CHROME_EXECUTABLE_PATH: /usr/bin/chromium
+      HEADLESS: "true"
+    volumes:
+      - ./logs:/app/logs
+    # Chrome precisa de /dev/shm generoso
+    shm_size: "2gb"
+    init: true
+    # Permite TARGET_URLS=http://host.docker.internal:PORT (serviço no host)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

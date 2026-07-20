@@ -32,6 +32,9 @@ yarn-error.log*
 Thumbs.db
 Desktop.ini
 
+# Docker (artefatos locais raros)
+*.dockerignore.local
+
 # Editores / IDE
 .idea/
 .vscode/

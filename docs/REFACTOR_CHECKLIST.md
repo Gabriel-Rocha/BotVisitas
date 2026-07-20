@@ -65,7 +65,7 @@
 ## Backlog (pós-v2)
 
 - [ ] Lint (eslint) + script `npm test` smoke
-- [ ] Docker opcional p/ servers
+- [x] Docker — forma padrão de execução (`Dockerfile` + `docker-compose.yml` + `docs/08-docker.md`)
 - [ ] Rotação real de proxy (quando houver orçamento)
 - [ ] Novas strategies sob demanda
 - [ ] Commit da refatoração (quando usuário pedir)

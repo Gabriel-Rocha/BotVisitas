@@ -13,6 +13,7 @@ Documentação enxuta para reduzir tokens e manter coerência na refatoração.
 7. [05-referencia-tecnica.md](./05-referencia-tecnica.md) ← referência completa (módulos, config, fluxo)
 8. [06-red-team-harness.md](./06-red-team-harness.md) ← harness de cobertura de detecção (teste defensivo autorizado)
 9. **[07-clausula-petrea.md](./07-clausula-petrea.md)** ← ⚖️ FUNDACIONAL: cláusula pétrea (uso defensivo, só infra sua) + registro de alterações
+10. [08-docker.md](./08-docker.md) ← execução padrão no container
 
 ## Regra
 

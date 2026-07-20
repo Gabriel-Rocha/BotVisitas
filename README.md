@@ -14,13 +14,25 @@ Regra completa e **imutável**: [`docs/07-clausula-petrea.md`](docs/07-clausula-
 
 ## Requisitos
 
-- Node.js **>= 18**
-- npm
+- **Docker + Compose** (forma padrão de execução)
+- Node/npm só para desenvolvimento local ou harness headed
 - **Browser só é necessário** se a strategy exigir (ex.: `directLink`) ou para o harness
-  - Default `dryRun` roda **sem** Chromium (ótimo p/ validar em qualquer device)
-  - Com browser: Chromium do Puppeteer (`npm run browsers:install`) **ou** `CHROME_EXECUTABLE_PATH`
+  - Default `dryRun` roda **sem** Chromium
+  - No Docker: Chromium do sistema já vem na imagem
 
-## Setup rápido
+## Setup rápido (Docker — recomendado)
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+Ou: `npm run docker:up` → `npm run docker:logs`.
+
+Default: `STRATEGY=dryRun`. Detalhes: [`docs/08-docker.md`](docs/08-docker.md).
+
+## Setup local (sem Docker)
 
 ```bash
 cp .env.example .env
@@ -28,19 +40,21 @@ npm install
 npm start
 ```
 
-Default: `STRATEGY=dryRun` — sem browser e sem direct links (proposital).
-
 ## Scripts
 
 | Comando | O que faz |
 |---------|-----------|
-| `npm start` | Sobe o bot com a strategy do `.env` |
+| `npm run docker:up` | Build + sobe o bot no container |
+| `npm run docker:logs` | Logs do container |
+| `npm run docker:down` | Para o container |
+| `npm run docker:restart` | Reinicia o container |
+| `npm start` | Sobe o bot no host (dev) |
 | `npm run start:dry` | Força `dryRun` (sem browser) |
-| `npm run start:headed` | Abre a janela do browser (debug) |
+| `npm run start:headed` | Abre a janela do browser (debug no host) |
 | `npm run redteam` | Harness de cobertura de detecção (L0→L4, coletor local) |
 | `npm run redteam:headed` | Idem, com janela para acompanhar |
 | `npm run test:server` | Sobe página de teste local em `:3000` (botão `#cta`) |
-| `npm run browsers:install` | Baixa o Chromium do Puppeteer |
+| `npm run browsers:install` | Baixa o Chromium do Puppeteer (só host) |
 
 ## Estratégias (bot principal)
 
@@ -91,6 +105,7 @@ Ver `src/core/proxy.js`.
 ## Documentação
 
 - ⚖️ **[`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md)** — fundacional (uso + registro de alterações)
+- [`docs/08-docker.md`](docs/08-docker.md) — rodar sempre no container
 - [`docs/05-referencia-tecnica.md`](docs/05-referencia-tecnica.md) — referência técnica completa
 - [`docs/06-red-team-harness.md`](docs/06-red-team-harness.md) — o harness de detecção
 - [`docs/README.md`](docs/README.md) — índice e ordem de leitura
