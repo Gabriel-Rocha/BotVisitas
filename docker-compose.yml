@@ -1,12 +1,26 @@
 services:
+  # Sandbox local na porta 3000 do host → o bot usa http://host.docker.internal:3000
+  testpage:
+    image: node:20-bookworm-slim
+    container_name: botvisitas-testpage
+    working_dir: /app
+    volumes:
+      - ./scripts/test-server.js:/app/test-server.js:ro
+    command: ["node", "test-server.js"]
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
   bot:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: botvisitas
     restart: unless-stopped
-    env_file:
-      - .env
+    depends_on:
+      - testpage
+    # Sem env_file: TARGET_URLS e o resto vêm só do .env montado (dotenv no start).
+    # Assim editar o arquivo no host + Stop/Start no dashboard aplica na hora.
     environment:
       CHROME_EXECUTABLE_PATH: /usr/bin/chromium
       HEADLESS: "true"

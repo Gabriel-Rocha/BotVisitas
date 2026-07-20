@@ -1,10 +1,29 @@
 'use strict';
 
+const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { getProxyLaunchArgs } = require('./proxy');
 
 puppeteer.use(StealthPlugin());
+
+const SYSTEM_CHROME_CANDIDATES = [
+  process.env.CHROME_EXECUTABLE_PATH,
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+].filter(Boolean);
+
+function resolveChromePath(configured) {
+  const candidates = [configured, ...SYSTEM_CHROME_CANDIDATES].filter(Boolean);
+  for (const candidate of candidates) {
+    const p = String(candidate).trim();
+    if (p && fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 /**
  * @param {object} config
@@ -20,6 +39,7 @@ async function launchBrowser(config, logger, forcedProxy = null) {
   const args = [
     '--disable-dev-shm-usage',
     '--no-sandbox',
+    '--disable-setuid-sandbox',
     '--disable-popup-blocking',
     '--disable-notifications',
     '--ignore-certificate-errors',
@@ -32,11 +52,14 @@ async function launchBrowser(config, logger, forcedProxy = null) {
     ignoreDefaultArgs: ['--enable-automation'],
   };
 
-  if (config.chromeExecutablePath) {
-    options.executablePath = config.chromeExecutablePath;
-    logger.info(`Usando browser do sistema: ${config.chromeExecutablePath}`);
+  const chromePath = resolveChromePath(config.chromeExecutablePath);
+  if (chromePath) {
+    options.executablePath = chromePath;
+    logger.info(`Usando browser do sistema: ${chromePath}`);
   } else {
-    logger.info('Usando Chromium embutido do Puppeteer');
+    logger.warn(
+      'Nenhum Chromium do sistema encontrado — tentando o embutido do Puppeteer (pode falhar no Docker).'
+    );
   }
 
   const browser = await puppeteer.launch(options);
@@ -54,4 +77,4 @@ async function closeBrowser(browser, logger) {
   }
 }
 
-module.exports = { launchBrowser, closeBrowser };
+module.exports = { launchBrowser, closeBrowser, resolveChromePath };

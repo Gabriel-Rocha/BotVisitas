@@ -4,7 +4,8 @@ const { createApp } = require('./routes');
 const { createBufferedLogger } = require('./bufferedLogger');
 
 const PORT = Number.parseInt(process.env.DASHBOARD_PORT || '3847', 10);
-const HOST = process.env.DASHBOARD_HOST || '127.0.0.1';
+// 0.0.0.0 = acessível via porta publicada no Docker; 127.0.0.1 só funciona dentro do container
+const HOST = process.env.DASHBOARD_HOST || '0.0.0.0';
 
 const logger = createBufferedLogger('info');
 const app = createApp();

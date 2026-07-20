@@ -24,29 +24,41 @@ function readEnvFile() {
   return fs.readFileSync(ENV_PATH, 'utf8');
 }
 
+function parseEnvFileOnly() {
+  if (!fs.existsSync(ENV_PATH)) return {};
+  return dotenv.parse(fs.readFileSync(ENV_PATH, 'utf8'));
+}
+
 function getSafeConfig() {
+  // Fonte de verdade = arquivo montado (não process.env residual do Compose).
+  const fileEnv = parseEnvFileOnly();
   dotenv.config({ path: ENV_PATH, override: true });
 
-  const proxyList = process.env.PROXY_LIST || '';
+  const get = (key, fallback = '') =>
+    fileEnv[key] !== undefined && fileEnv[key] !== ''
+      ? fileEnv[key]
+      : process.env[key] || fallback;
+
+  const proxyList = get('PROXY_LIST', '');
   const proxyCount = proxyList
     ? proxyList.split(/[\n,]+/).filter((s) => s.trim()).length
     : 0;
 
   return {
-    STRATEGY: process.env.STRATEGY || 'dryRun',
-    CONCURRENCY: process.env.CONCURRENCY || '5',
-    INTERVAL_MIN_SEC: process.env.INTERVAL_MIN_SEC || '60',
-    INTERVAL_MAX_SEC: process.env.INTERVAL_MAX_SEC || '900',
-    BROWSER_RESTART_EVERY: process.env.BROWSER_RESTART_EVERY || '20',
-    HEADLESS: process.env.HEADLESS || 'true',
-    PROXY_ENABLED: process.env.PROXY_ENABLED || 'false',
-    TARGET_URLS: process.env.TARGET_URLS || '',
-    CLICK_SELECTOR: process.env.CLICK_SELECTOR || '',
-    INCLUDE_REFERRER: process.env.INCLUDE_REFERRER || 'true',
+    STRATEGY: get('STRATEGY', 'dryRun'),
+    CONCURRENCY: get('CONCURRENCY', '5'),
+    INTERVAL_MIN_SEC: get('INTERVAL_MIN_SEC', '60'),
+    INTERVAL_MAX_SEC: get('INTERVAL_MAX_SEC', '900'),
+    BROWSER_RESTART_EVERY: get('BROWSER_RESTART_EVERY', '20'),
+    HEADLESS: get('HEADLESS', 'true'),
+    PROXY_ENABLED: get('PROXY_ENABLED', 'false'),
+    TARGET_URLS: get('TARGET_URLS', ''),
+    CLICK_SELECTOR: get('CLICK_SELECTOR', ''),
+    INCLUDE_REFERRER: get('INCLUDE_REFERRER', 'true'),
     PROXY_LIST_MASKED: proxyCount
       ? `${proxyCount} proxies configurados (ocultos)`
       : '(vazio)',
-    PROXY_SERVER_SET: Boolean((process.env.PROXY_SERVER || '').trim()),
+    PROXY_SERVER_SET: Boolean(get('PROXY_SERVER', '').trim()),
   };
 }
 

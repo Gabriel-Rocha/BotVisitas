@@ -5,7 +5,39 @@ const path = require('path');
 const dotenv = require('dotenv');
 const { parseProxyList, FREE_PLAN_MAX } = require('../core/proxy');
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+const ENV_PATH = path.resolve(process.cwd(), '.env');
+
+/** Vars injetadas pelo Docker Compose não devem ser sobrescritas pelo .env montado. */
+const PRESERVE_ENV_KEYS = [
+  'DASHBOARD_HOST',
+  'DASHBOARD_PORT',
+  'CHROME_EXECUTABLE_PATH',
+  'NODE_ENV',
+];
+
+/**
+ * Relê o .env com override (p/ STRATEGY, TARGET_URLS, etc.).
+ * Mantém chaves já definidas pelo Compose (ex.: DASHBOARD_HOST=0.0.0.0).
+ */
+function reloadEnv() {
+  const preserved = {};
+  for (const key of PRESERVE_ENV_KEYS) {
+    if (process.env[key] !== undefined && process.env[key] !== '') {
+      preserved[key] = process.env[key];
+    }
+  }
+  // Lê o arquivo de forma explícita — evita valor antigo preso em process.env
+  // quando o Compose injetou env_file e o .env no disco já mudou.
+  if (fs.existsSync(ENV_PATH)) {
+    const parsed = dotenv.parse(fs.readFileSync(ENV_PATH, 'utf8'));
+    Object.assign(process.env, parsed);
+  } else {
+    dotenv.config({ path: ENV_PATH, override: true });
+  }
+  Object.assign(process.env, preserved);
+}
+
+reloadEnv();
 
 function bool(value, fallback) {
   if (value === undefined || value === '') return fallback;
@@ -31,6 +63,8 @@ function parseUrls(raw) {
 }
 
 function loadConfig() {
+  reloadEnv();
+
   const userAgents = loadJson('user-agents.json');
   const referrers = loadJson('referrers.json');
 
@@ -45,7 +79,6 @@ function loadConfig() {
     intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 60),
     intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 900),
     browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 20),
-    // Workers paralelos (default 5). Com proxy: teto = pool ≤ 10.
     concurrency: int(process.env.CONCURRENCY, 5),
 
     viewport: {
@@ -80,4 +113,4 @@ function loadConfig() {
   return config;
 }
 
-module.exports = { loadConfig };
+module.exports = { loadConfig, reloadEnv, ENV_PATH };
