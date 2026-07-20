@@ -8,14 +8,16 @@ services:
     env_file:
       - .env
     environment:
-      # Garante Chromium do container mesmo se .env estiver vazio
       CHROME_EXECUTABLE_PATH: /usr/bin/chromium
       HEADLESS: "true"
+      DASHBOARD_HOST: "0.0.0.0"
+      DASHBOARD_PORT: "3847"
+    ports:
+      - "3847:3847"
     volumes:
       - ./logs:/app/logs
-    # Chrome precisa de /dev/shm generoso
+      - ./.env:/app/.env
     shm_size: "2gb"
     init: true
-    # Permite TARGET_URLS=http://host.docker.internal:PORT (serviço no host)
     extra_hosts:
       - "host.docker.internal:host-gateway"

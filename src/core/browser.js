@@ -2,12 +2,20 @@
 
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { getProxyLaunchArgs, assertProxyReady } = require('./proxy');
+const { getProxyLaunchArgs } = require('./proxy');
 
 puppeteer.use(StealthPlugin());
 
-async function launchBrowser(config, logger) {
-  assertProxyReady(config.proxy, logger);
+/**
+ * @param {object} config
+ * @param {object} logger
+ * @param {object|null} [forcedProxy] — proxy já adquirido pelo worker (lease exclusivo)
+ */
+async function launchBrowser(config, logger, forcedProxy = null) {
+  const activeProxy = forcedProxy || null;
+  if (activeProxy) {
+    logger.info(`Proxy selecionado: ${activeProxy.label}`);
+  }
 
   const args = [
     '--disable-dev-shm-usage',
@@ -15,7 +23,7 @@ async function launchBrowser(config, logger) {
     '--disable-popup-blocking',
     '--disable-notifications',
     '--ignore-certificate-errors',
-    ...getProxyLaunchArgs(config.proxy),
+    ...getProxyLaunchArgs(activeProxy),
   ];
 
   const options = {
@@ -33,7 +41,7 @@ async function launchBrowser(config, logger) {
 
   const browser = await puppeteer.launch(options);
   logger.info('Browser iniciado');
-  return browser;
+  return { browser, activeProxy };
 }
 
 async function closeBrowser(browser, logger) {

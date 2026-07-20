@@ -12,7 +12,7 @@
 |---|----------|-------|
 | 1 | Escopo | Reescrita do zero; colaborativo + multi-dispositivo |
 | 2 | Direct Link | Código existe; **default = dryRun** (links fora de uso de propósito) |
-| 3 | Proxies | Stub pronto; `PROXY_ENABLED=false` |
+| 3 | Proxies | Webshare free (máx. 10); lease exclusivo por worker |
 | 4 | JS | **CommonJS** |
 | 5 | Chromium | Embutido no Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
 | 6 | Blog / GH Pages / fetch | Fora do v1 |
@@ -66,9 +66,13 @@
 
 - [ ] Lint (eslint) + script `npm test` smoke
 - [x] Docker — forma padrão de execução (`Dockerfile` + `docker-compose.yml` + `docs/08-docker.md`)
-- [ ] Rotação real de proxy (quando houver orçamento)
+- [x] Proxy Webshare free (máx. 10) — lease exclusivo + workers (`docs/09-proxies-webshare.md`)
+- [x] Workers concorrentes (`CONCURRENCY`, default 5)
+- [x] Dashboard UI (Express + React) — `docs/10-dashboard.md`
+- [ ] Health-check de proxy (pular IP morto)
+- [ ] Rotação premium / residencial (quando houver orçamento)
 - [ ] Novas strategies sob demanda
-- [ ] Commit da refatoração (quando usuário pedir)
+- [ ] Commit (quando usuário pedir)
 
 ---
 

@@ -57,3 +57,5 @@ build/
 tmp/
 temp/
 *.tmp
+web/dist/
+web/node_modules/

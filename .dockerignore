@@ -11,6 +11,8 @@ docker-compose.*.yml
 
 # Dependências e artefatos locais
 node_modules
+web/node_modules
+web/dist
 npm-debug.log*
 coverage
 .nyc_output

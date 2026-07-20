@@ -14,6 +14,8 @@ Documentação enxuta para reduzir tokens e manter coerência na refatoração.
 8. [06-red-team-harness.md](./06-red-team-harness.md) ← harness de cobertura de detecção (teste defensivo autorizado)
 9. **[07-clausula-petrea.md](./07-clausula-petrea.md)** ← ⚖️ FUNDACIONAL: cláusula pétrea (uso defensivo, só infra sua) + registro de alterações
 10. [08-docker.md](./08-docker.md) ← execução padrão no container
+11. [09-proxies-webshare.md](./09-proxies-webshare.md) ← plano free Webshare (máx. 10)
+12. [10-dashboard.md](./10-dashboard.md) ← painel web de operação
 
 ## Regra
 
