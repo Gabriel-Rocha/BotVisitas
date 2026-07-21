@@ -48,9 +48,10 @@ Tudo via `.env` (montado pelo Compose). Overrides fixos no compose:
 
 - `CHROME_EXECUTABLE_PATH=/usr/bin/chromium`
 - `HEADLESS=true`
-- `DATABASE_URL=postgres://...@db:5432/...` (host interno `db`, preservado mesmo com `.env` montado)
+- `DATABASE_URL` interno apontando para o host `db` (senha vem de `POSTGRES_PASSWORD` no `.env`)
 
-Variáveis do Postgres: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `SNAPSHOT_INTERVAL_SEC`.
+Variáveis do Postgres (obrigatório no `.env`, **nunca** no Git): `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `DATABASE_URL` (local), `SNAPSHOT_INTERVAL_SEC`.
+Sem `POSTGRES_PASSWORD` no `.env`, o Compose falha de propósito.
 
 ## Fluxo de teste (um comando só)
 
