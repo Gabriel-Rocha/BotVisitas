@@ -156,9 +156,9 @@ loop. Erros não tratados caem no `.catch` final (`[FATAL]`, exit 1).
   Ideal para validar config/loop em qualquer device sem Chromium.
 
 ### `src/strategies/directLink.js` — **opt-in, com browser**
-- `requiresBrowser: true`. Exige `TARGET_URLS`. Opcionalmente navega por um referrer,
-  acessa a URL alvo e dá N cliques (1..`MAX_CLICKS_PER_PAGE`) no centro da viewport.
-- Links propositalmente fora de uso por padrão; ativar só com decisão explícita.
+- `requiresBrowser: true`. Exige `TARGET_URLS`. Abre a URL de entrada, faz scroll/dwell
+  e navega `BROWSE_PAGES_MIN`..`BROWSE_PAGES_MAX` links **internos do mesmo host**.
+- Sem clique forçado em CTA. Ativar só com decisão explícita, contra infra sua.
 
 ### `src/utils/`
 - `logger.js` — logger com níveis (`error`/`warn`/`info`/`debug`) e timestamp ISO;
@@ -168,7 +168,8 @@ loop. Erros não tratados caem no `.catch` final (`[FATAL]`, exit 1).
 - `sleep.js` — `sleep(ms)` baseado em Promise (nunca usar `page.waitForTimeout`).
 
 ### `src/data/`
-- `user-agents.json` — pool de UAs (Chrome/Firefox/Edge, Win/Mac/Linux).
+- `device-profiles.json` — perfis `desktop` / `mobile` / `tablet` (viewport + UA + touch).
+- `user-agents.json` — pool legado de UAs desktop (fallback / red-team).
 - `referrers.json` — pool de referrers (Google, Wikipedia, Bing).
 
 ---
@@ -187,12 +188,14 @@ Copie `.env.example` para `.env`. **Nunca** commite o `.env`.
 | `INTERVAL_MIN_SEC` | `60` | int | Mínimo de espera entre iterações (s) |
 | `INTERVAL_MAX_SEC` | `900` | int | Máximo de espera entre iterações (s) |
 | `BROWSER_RESTART_EVERY` | `20` | int | Reinicia o browser a cada N iterações (`0` = nunca) |
-| `VIEWPORT_WIDTH` | `1920` | int | Largura da viewport |
-| `VIEWPORT_HEIGHT` | `1080` | int | Altura da viewport |
-| `TARGET_URLS` | *(vazio)* | CSV | URLs alvo (só `directLink`); **apenas infra sua** |
-| `MAX_CLICKS_PER_PAGE` | `15` | int | Máximo de cliques por página (`directLink`) |
+| `CONCURRENCY` | `5` | int | Workers se `DEVICE_MIX` vazio |
+| `DEVICE_MIX` | *(vazio)* | CSV | Ex.: `desktop:2,mobile:2` — soma manda; vazio = todos desktop |
+| `VIEWPORT_WIDTH` | `1920` | int | Fallback de largura (preferir perfis de device) |
+| `VIEWPORT_HEIGHT` | `1080` | int | Fallback de altura (preferir perfis de device) |
+| `TARGET_URLS` | *(vazio)* | CSV | URLs de entrada (`directLink`); **apenas infra sua** |
+| `BROWSE_PAGES_MIN` | `1` | int | Mín. de páginas internas após a entrada |
+| `BROWSE_PAGES_MAX` | `3` | int | Máx. de páginas internas após a entrada |
 | `INCLUDE_REFERRER` | `true` | bool | Navega por um referrer antes do alvo |
-| `CLICK_SELECTOR` | *(vazio)* | string | CSS selector a clicar (aspas se começar com `#`); vazio = centro |
 | `TARGET_ALLOW_HOSTS` | *(vazio)* | CSV | Allow-list de hosts p/ `directLink`; vazio = sem restrição |
 | `PROXY_ENABLED` | `false` | bool | Liga o proxy (experimental / custo) |
 | `PROXY_SERVER` | *(vazio)* | url | `http://user:pass@host:port` (obrigatório se enabled) |
@@ -229,27 +232,25 @@ TARGET_URLS=https://exemplo.com/a,https://exemplo.com/b
 
 ### Testando a `directLink` na sua própria página
 
-Para verificar o fluxo acesso + clique contra uma página **que você controla**,
-clicando um elemento real:
+Fluxo: entra na URL → scroll/dwell → segue links internos do mesmo domínio.
 
 ```env
 STRATEGY=directLink
-TARGET_URLS=https://staging.seudominio/pagina    # ou file:///caminho/test.html
-CLICK_SELECTOR="#seu-botao"                       # ASPAS se começar com "#" (senão o dotenv corta)
-INCLUDE_REFERRER=false                            # teste limpo, sem referrer externo
-INTERVAL_MIN_SEC=2                                 # ciclos rápidos
-INTERVAL_MAX_SEC=5
-# TARGET_ALLOW_HOSTS=staging.seudominio           # opcional: trava o alvo
+TARGET_URLS=https://staging.seudominio/
+BROWSE_PAGES_MIN=1
+BROWSE_PAGES_MAX=3
+INCLUDE_REFERRER=false
+INTERVAL_MIN_SEC=30
+INTERVAL_MAX_SEC=60
+# TARGET_ALLOW_HOSTS=staging.seudominio
 ```
 
 ```bash
 npm run start:headed    # abre a janela p/ acompanhar
 ```
 
-No log, cada iteração mostra: `status=<HTTP>`, `title="..."`, se o selector foi
-encontrado e quantos cliques. Se o `CLICK_SELECTOR` não existir na página, a
-iteração é marcada como falha (`ok:false`) — o teste sinaliza o problema em vez de
-clicar no vazio. `Ctrl+C` encerra com shutdown gracioso.
+No log: `Entrada:`, `Links internos encontrados: N`, `Navegação 1/3:`, `Lendo página`.
+`Ctrl+C` encerra com shutdown gracioso.
 
 > `TARGET_URLS` deve apontar **só para infra que você controla** — não para
 > smartlinks de ads ou páginas de terceiros.

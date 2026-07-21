@@ -6,7 +6,7 @@ const { randomInt } = require('../utils/random');
 const { sleep } = require('../utils/sleep');
 
 /**
- * Um worker = 1 Chromium (+ 1 proxy exclusivo se houver lease).
+ * Um worker = 1 Chromium (+ 1 proxy exclusivo se houver lease) + 1 perfil de device.
  */
 function createWorker({
   workerId,
@@ -14,12 +14,16 @@ function createWorker({
   strategy,
   logger,
   proxyLease = null,
+  deviceType = 'desktop',
+  deviceProfile = null,
 }) {
   const needsBrowser = strategy.requiresBrowser !== false;
   const prefix = `[w${workerId}]`;
+  const device = deviceProfile ? { type: deviceType, profile: deviceProfile } : null;
 
   const stats = {
     workerId,
+    deviceType,
     startedAt: Date.now(),
     iterations: 0,
     ok: 0,
@@ -76,7 +80,7 @@ function createWorker({
       info: (...a) => log('info', ...a),
       warn: (...a) => log('warn', ...a),
       debug: (...a) => log('debug', ...a),
-    }, activeProxy);
+    }, activeProxy, device);
   }
 
   async function restartBrowserWithNewProxy() {
@@ -136,7 +140,7 @@ function createWorker({
   async function run() {
     log(
       'info',
-      `Worker start | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'}`
+      `Worker start | device=${deviceType} | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'}`
     );
 
     while (!stopping) {
@@ -152,7 +156,7 @@ function createWorker({
             page = await recreateSession(browser, page, config, {
               info: (...a) => log('info', ...a),
               debug: (...a) => log('debug', ...a),
-            }, activeProxy);
+            }, activeProxy, device);
           } catch {
             await closeBrowser(browser, {
               info: (...a) => log('info', ...a),

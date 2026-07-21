@@ -68,6 +68,7 @@
 - [x] Docker — forma padrão de execução (`Dockerfile` + `docker-compose.yml` + `docs/08-docker.md`)
 - [x] Proxy Webshare free (máx. 10) — lease exclusivo + workers (`docs/09-proxies-webshare.md`)
 - [x] Workers concorrentes (`CONCURRENCY`, default 5)
+- [x] Multi-agentes por device (`DEVICE_MIX` + `device-profiles.json`)
 - [x] Dashboard UI (Express + React) — `docs/10-dashboard.md`
 - [ ] Health-check de proxy (pular IP morto)
 - [ ] Rotação premium / residencial (quando houver orçamento)

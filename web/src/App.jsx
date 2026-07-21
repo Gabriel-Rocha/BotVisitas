@@ -83,13 +83,15 @@ export default function App() {
       const body = {
         STRATEGY: config.STRATEGY,
         CONCURRENCY: config.CONCURRENCY,
+        DEVICE_MIX: config.DEVICE_MIX,
         INTERVAL_MIN_SEC: config.INTERVAL_MIN_SEC,
         INTERVAL_MAX_SEC: config.INTERVAL_MAX_SEC,
         BROWSER_RESTART_EVERY: config.BROWSER_RESTART_EVERY,
         HEADLESS: config.HEADLESS,
         PROXY_ENABLED: config.PROXY_ENABLED,
         TARGET_URLS: config.TARGET_URLS,
-        CLICK_SELECTOR: config.CLICK_SELECTOR,
+        BROWSE_PAGES_MIN: config.BROWSE_PAGES_MIN,
+        BROWSE_PAGES_MAX: config.BROWSE_PAGES_MAX,
         INCLUDE_REFERRER: config.INCLUDE_REFERRER,
       };
       const result = await saveConfig(body);
@@ -181,6 +183,7 @@ export default function App() {
               <thead>
                 <tr>
                   <th>ID</th>
+                  <th>Device</th>
                   <th>Proxy</th>
                   <th>OK</th>
                   <th>Err</th>
@@ -191,6 +194,11 @@ export default function App() {
                 {stats.workers.map((w) => (
                   <tr key={w.workerId}>
                     <td>w{w.workerId}</td>
+                    <td>
+                      <span className={`device-badge device-${w.deviceType || 'desktop'}`}>
+                        {w.deviceType || 'desktop'}
+                      </span>
+                    </td>
                     <td>{w.proxyLabel || '—'}</td>
                     <td>{w.ok}</td>
                     <td>{w.errors}</td>
@@ -206,6 +214,11 @@ export default function App() {
             strategy={status.strategy} · concurrency={status.concurrency} · proxy=
             {status.proxyEnabled ? 'on' : 'off'} · pool=
             {status.proxyPoolSize ?? 0}
+            {stats.devices && Object.keys(stats.devices).length
+              ? ` · devices=${Object.entries(stats.devices)
+                  .map(([k, v]) => `${k}:${v}`)
+                  .join(',')}`
+              : ''}
           </p>
         </section>
 
@@ -229,6 +242,17 @@ export default function App() {
                   value={config.CONCURRENCY}
                   onChange={(e) => updateField('CONCURRENCY', e.target.value)}
                 />
+              </div>
+              <div className="field">
+                <label>DEVICE_MIX</label>
+                <input
+                  value={config.DEVICE_MIX || ''}
+                  onChange={(e) => updateField('DEVICE_MIX', e.target.value)}
+                  placeholder="desktop:2,mobile:2,tablet:1"
+                />
+                <p className="muted">
+                  Vazio = todos desktop (usa CONCURRENCY). Com mix, a soma manda.
+                </p>
               </div>
               <div className="field">
                 <label>INTERVAL_MIN_SEC</label>
@@ -281,15 +305,21 @@ export default function App() {
                   placeholder="só infra sua — salve ou edite o .env e dê Start"
                 />
                 <p className="muted">
-                  O Start relê o .env do disco. Se editar o arquivo fora daqui, não clique em
-                  Salvar com o campo antigo — isso sobrescreve o arquivo.
+                  O worker entra no link e navega páginas internas do mesmo domínio.
                 </p>
               </div>
               <div className="field">
-                <label>CLICK_SELECTOR</label>
+                <label>BROWSE_PAGES_MIN</label>
                 <input
-                  value={config.CLICK_SELECTOR}
-                  onChange={(e) => updateField('CLICK_SELECTOR', e.target.value)}
+                  value={config.BROWSE_PAGES_MIN || '1'}
+                  onChange={(e) => updateField('BROWSE_PAGES_MIN', e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>BROWSE_PAGES_MAX</label>
+                <input
+                  value={config.BROWSE_PAGES_MAX || '3'}
+                  onChange={(e) => updateField('BROWSE_PAGES_MAX', e.target.value)}
                 />
               </div>
               <div className="field">

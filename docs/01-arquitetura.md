@@ -21,14 +21,16 @@ BotVisitas/
 │   ├── core/
 │   │   ├── browser.js
 │   │   ├── session.js
-│   │   ├── worker.js       # 1 Chromium + 1 proxy
-│   │   ├── loop.js         # orquestra N workers
+│   │   ├── worker.js       # 1 Chromium + 1 proxy + 1 device profile
+│   │   ├── loop.js         # orquestra N workers / DEVICE_MIX
+│   │   ├── devices.js      # parse mix + personas
 │   │   └── proxy.js        # lease exclusivo (máx. 10)
 │   ├── strategies/
 │   │   ├── index.js        # registry
 │   │   ├── dryRun.js       # DEFAULT
 │   │   └── directLink.js   # desligado por default
 │   ├── data/
+│   │   ├── device-profiles.json
 │   │   ├── user-agents.json
 │   │   └── referrers.json
 │   └── utils/
@@ -64,8 +66,22 @@ module.exports = {
 };
 ```
 
-## Multi-dispositivo
+## Multi-dispositivo (agentes)
 
+Cada worker é um agente com perfil fixo (`desktop` | `mobile` | `tablet`):
+viewport + UA + `isMobile`/`hasTouch` coerentes ([`src/data/device-profiles.json`](../src/data/device-profiles.json)).
+
+```env
+# Vazio = N workers desktop (usa CONCURRENCY)
+DEVICE_MIX=desktop:2,mobile:2,tablet:1
+```
+
+- Se `DEVICE_MIX` estiver setado, a **soma manda** (CONCURRENCY é fallback).
+- Com proxy, o pool (máx. 10) pode truncar o mix.
+- Sem proxy + browser: força 1 worker (mesmo IP).
+- Dashboard mostra badge de device por worker.
+
+Também:
 - Config só via env (sem paths absolutos de um SO)
 - Browser só se `requiresBrowser: true`
 - `CHROME_EXECUTABLE_PATH` opcional

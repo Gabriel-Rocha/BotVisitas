@@ -266,6 +266,32 @@ th {
   font-size: 0.85rem;
 }
 
+.device-badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.device-badge.device-mobile {
+  border-color: #3d6b8a;
+  color: #9ec9e6;
+}
+
+.device-badge.device-tablet {
+  border-color: #6b5a3d;
+  color: #e6d09e;
+}
+
+.device-badge.device-desktop {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
 .logs {
   height: 280px;
   overflow: auto;
