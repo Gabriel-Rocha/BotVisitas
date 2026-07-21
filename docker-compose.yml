@@ -1,4 +1,24 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: botvisitas-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-botvisitas}
+      POSTGRES_USER: ${POSTGRES_USER:-botvisitas}
+      # Obrigatório no .env — sem default (evita secret no repositório)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - botvisitas_pg_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
   # Sandbox local na porta 3000 do host → o bot usa http://host.docker.internal:3000
   testpage:
     image: node:20-bookworm-slim
@@ -18,7 +38,10 @@ services:
     container_name: botvisitas
     restart: unless-stopped
     depends_on:
-      - testpage
+      db:
+        condition: service_healthy
+      testpage:
+        condition: service_started
     # Sem env_file: TARGET_URLS e o resto vêm só do .env montado (dotenv no start).
     # Assim editar o arquivo no host + Stop/Start no dashboard aplica na hora.
     environment:
@@ -26,6 +49,9 @@ services:
       HEADLESS: "true"
       DASHBOARD_HOST: "0.0.0.0"
       DASHBOARD_PORT: "3847"
+      # Dentro da rede Compose o host é o serviço "db" (senha só via .env)
+      DATABASE_URL: postgres://${POSTGRES_USER:-botvisitas}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-botvisitas}
+      SNAPSHOT_INTERVAL_SEC: ${SNAPSHOT_INTERVAL_SEC:-10}
     ports:
       - "3847:3847"
     volumes:
@@ -35,3 +61,6 @@ services:
     init: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+volumes:
+  botvisitas_pg_data:

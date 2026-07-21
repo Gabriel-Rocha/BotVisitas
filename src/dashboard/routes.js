@@ -6,6 +6,16 @@ const fs = require('fs');
 const botRuntime = require('./botRuntime');
 const logBuffer = require('./logBuffer');
 const { getSafeConfig, updateSafeConfig } = require('./configStore');
+const {
+  healthCheck,
+  isAvailable,
+  getLastError,
+  listRuns,
+  getRun,
+  listRunLogs,
+  listRunSnapshots,
+  assertUuid,
+} = require('../db');
 
 function authMiddleware(req, res, next) {
   const token = (process.env.DASHBOARD_TOKEN || '').trim();
@@ -22,8 +32,14 @@ function createApp() {
   const app = express();
   app.use(express.json({ limit: '32kb' }));
 
-  app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, service: 'botvisitas-dashboard' });
+  app.get('/api/health', async (_req, res) => {
+    const db = await healthCheck();
+    res.json({
+      ok: true,
+      service: 'botvisitas-dashboard',
+      db: db.status || (db.ok ? 'up' : 'down'),
+      dbError: db.error || null,
+    });
   });
 
   app.use('/api', authMiddleware);
@@ -32,9 +48,9 @@ function createApp() {
     res.json(botRuntime.getStatus());
   });
 
-  app.post('/api/bot/start', async (_req, res) => {
+  app.post('/api/bot/start', async (req, res) => {
     try {
-      const result = await botRuntime.start();
+      const result = await botRuntime.start(req.body || {});
       res.json(result);
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -50,9 +66,9 @@ function createApp() {
     }
   });
 
-  app.post('/api/bot/restart', async (_req, res) => {
+  app.post('/api/bot/restart', async (req, res) => {
     try {
-      const result = await botRuntime.restart();
+      const result = await botRuntime.restart(req.body || {});
       res.json(result);
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -94,6 +110,83 @@ function createApp() {
       clearInterval(heartbeat);
       unsub();
     });
+  });
+
+  // ── Histórico (Postgres) ──
+
+  app.get('/api/runs', async (req, res) => {
+    try {
+      if (!isAvailable()) {
+        return res.status(503).json({
+          ok: false,
+          error: getLastError() || 'Histórico indisponível (Postgres offline)',
+        });
+      }
+      const status = typeof req.query.status === 'string' ? req.query.status : null;
+      const allowed = new Set(['running', 'stopped', 'error', 'crashed']);
+      if (status && !allowed.has(status)) {
+        return res.status(400).json({ ok: false, error: 'status inválido' });
+      }
+      const data = await listRuns({
+        limit: req.query.limit,
+        offset: req.query.offset,
+        status,
+      });
+      res.json({ ok: true, ...data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/runs/:id', async (req, res) => {
+    try {
+      assertUuid(req.params.id);
+      if (!isAvailable()) {
+        return res.status(503).json({ ok: false, error: 'Histórico indisponível' });
+      }
+      const run = await getRun(req.params.id);
+      if (!run) return res.status(404).json({ ok: false, error: 'Run não encontrado' });
+      res.json({ ok: true, run });
+    } catch (err) {
+      const code = err.code === 'VALIDATION' ? 400 : 500;
+      res.status(code).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/runs/:id/logs', async (req, res) => {
+    try {
+      assertUuid(req.params.id);
+      if (!isAvailable()) {
+        return res.status(503).json({ ok: false, error: 'Histórico indisponível' });
+      }
+      const level = typeof req.query.level === 'string' ? req.query.level : null;
+      const before = typeof req.query.before === 'string' ? req.query.before : null;
+      const items = await listRunLogs(req.params.id, {
+        limit: req.query.limit,
+        before,
+        level,
+      });
+      res.json({ ok: true, items });
+    } catch (err) {
+      const code = err.code === 'VALIDATION' ? 400 : 500;
+      res.status(code).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/runs/:id/snapshots', async (req, res) => {
+    try {
+      assertUuid(req.params.id);
+      if (!isAvailable()) {
+        return res.status(503).json({ ok: false, error: 'Histórico indisponível' });
+      }
+      const items = await listRunSnapshots(req.params.id, {
+        limit: req.query.limit,
+      });
+      res.json({ ok: true, items });
+    } catch (err) {
+      const code = err.code === 'VALIDATION' ? 400 : 500;
+      res.status(code).json({ ok: false, error: err.message });
+    }
   });
 
   const dist = path.resolve(process.cwd(), 'web/dist');

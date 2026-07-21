@@ -13,6 +13,7 @@ const PRESERVE_ENV_KEYS = [
   'DASHBOARD_PORT',
   'CHROME_EXECUTABLE_PATH',
   'NODE_ENV',
+  'DATABASE_URL',
 ];
 
 /**
@@ -123,4 +124,4 @@ function loadConfig() {
   return config;
 }
 
-module.exports = { loadConfig, reloadEnv, ENV_PATH };
+module.exports = { loadConfig, reloadEnv, parseUrls, ENV_PATH };

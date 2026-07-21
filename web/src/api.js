@@ -40,13 +40,60 @@ export async function saveConfig(body) {
   return data;
 }
 
-export async function botAction(action) {
+export async function botAction(action, body) {
+  const hasBody = body !== undefined && body !== null;
   const res = await fetch(`/api/bot/${action}`, {
     method: 'POST',
-    headers: headers(),
+    headers: headers(hasBody),
+    body: hasBody ? JSON.stringify(body) : undefined,
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `${action} ${res.status}`);
+  return data;
+}
+
+export async function fetchHealth() {
+  const res = await fetch('/api/health');
+  if (!res.ok) throw new Error(`health ${res.status}`);
+  return res.json();
+}
+
+export async function fetchRuns({ limit = 20, offset = 0, status } = {}) {
+  const q = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (status) q.set('status', status);
+  const res = await fetch(`/api/runs?${q}`, { headers: headers() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `runs ${res.status}`);
+  return data;
+}
+
+export async function fetchRun(id) {
+  const res = await fetch(`/api/runs/${id}`, { headers: headers() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `run ${res.status}`);
+  return data;
+}
+
+export async function fetchRunLogs(id, { limit = 200, before, level } = {}) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (before) q.set('before', before);
+  if (level) q.set('level', level);
+  const res = await fetch(`/api/runs/${id}/logs?${q}`, { headers: headers() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `logs ${res.status}`);
+  return data;
+}
+
+export async function fetchRunSnapshots(id, { limit = 200 } = {}) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(`/api/runs/${id}/snapshots?${q}`, {
+    headers: headers(),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `snapshots ${res.status}`);
   return data;
 }
 

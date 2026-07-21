@@ -10,7 +10,7 @@ Projeto pensado para **vários colaboradores** e execução em **vários disposi
 - Node.js + **CommonJS**
 - puppeteer + puppeteer-extra + stealth
 - dotenv (config)
-- Sem DB / API / UI no v1
+- Sem DB / API / UI no v1 rebuild inicial; **Postgres** agora persiste histórico do dashboard (runs, logs, snapshots)
 - Proxies: **interface pronta, uso desligado**
 
 ## Default seguro

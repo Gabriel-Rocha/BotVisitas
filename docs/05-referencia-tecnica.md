@@ -28,7 +28,7 @@ aleatórios, intervalos randômicos, stealth). Foi reescrito do zero com foco em
 | Entrypoint | [`src/index.js`](../src/index.js) |
 | Config | `.env` via `dotenv` |
 | Deps principais | `puppeteer`, `puppeteer-extra`, `puppeteer-extra-plugin-stealth`, `dotenv` |
-| Persistência | Nenhuma (sem DB / API / UI) |
+| Persistência | PostgreSQL (histórico de runs/logs/snapshots do dashboard; volume Docker) |
 
 ---
 

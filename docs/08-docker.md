@@ -33,11 +33,14 @@ npm run docker:down    # para e remove o container
 | User | `bot` (não-root) |
 | Entrypoint | `node src/dashboard/server.js` (API + UI) |
 | Porta | `3847` |
+| Postgres | serviço `db` (`postgres:16-alpine`) + volume `botvisitas_pg_data` |
 | Logs | volume `./logs` → `/app/logs` |
 | Restart | `unless-stopped` |
 | shm | 2 GB (evita crash do Chrome) |
 
 `PUPPETEER_SKIP_DOWNLOAD=true` — não baixa Chromium do Puppeteer no build.
+
+O Compose sobe **db → bot** (healthcheck `pg_isready`). `docker compose down` **não** apaga o volume; use `docker compose down -v` só se quiser zerar o histórico.
 
 ## Config
 
@@ -45,6 +48,10 @@ Tudo via `.env` (montado pelo Compose). Overrides fixos no compose:
 
 - `CHROME_EXECUTABLE_PATH=/usr/bin/chromium`
 - `HEADLESS=true`
+- `DATABASE_URL` interno apontando para o host `db` (senha vem de `POSTGRES_PASSWORD` no `.env`)
+
+Variáveis do Postgres (obrigatório no `.env`, **nunca** no Git): `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `DATABASE_URL` (local), `SNAPSHOT_INTERVAL_SEC`.
+Sem `POSTGRES_PASSWORD` no `.env`, o Compose falha de propósito.
 
 ## Fluxo de teste (um comando só)
 

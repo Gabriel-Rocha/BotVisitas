@@ -16,6 +16,7 @@ BotVisitas/
 ├── src/
 │   ├── index.js            # CLI entrypoint
 │   ├── dashboard/          # Express API + botRuntime
+│   ├── db/                 # Postgres (pool, schema, runs, logQueue)
 │   ├── app/runBot.js       # sessão reutilizável
 │   ├── config/index.js
 │   ├── core/
