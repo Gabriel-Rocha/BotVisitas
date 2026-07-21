@@ -70,6 +70,7 @@
 - [x] Workers concorrentes (`CONCURRENCY`, default 5)
 - [x] Multi-agentes por device (`DEVICE_MIX` + `device-profiles.json`)
 - [x] Dashboard UI (Express + React) — `docs/10-dashboard.md`
+- [x] Aba de visualização ao vivo do viewport por worker
 - [x] Histórico Postgres (runs + logs + snapshots, volume Docker persistente)
 - [ ] Health-check de proxy (pular IP morto)
 - [ ] Rotação premium / residencial (quando houver orçamento)

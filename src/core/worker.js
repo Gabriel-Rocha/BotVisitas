@@ -35,6 +35,8 @@ function createWorker({
   let page = null;
   let activeProxy = null;
   let stopping = false;
+  let captureInProgress = null;
+  let lastPreview = null;
 
   function log(level, ...args) {
     logger[level](prefix, ...args);
@@ -191,14 +193,51 @@ function createWorker({
     releaseProxy();
   }
 
+  async function capturePreview() {
+    if (!needsBrowser || !page || page.isClosed()) {
+      throw new Error('Worker sem página ativa para visualizar');
+    }
+    if (captureInProgress) return captureInProgress;
+
+    captureInProgress = (async () => {
+      const image = await page.screenshot({
+        type: 'jpeg',
+        quality: 68,
+        fullPage: false,
+        captureBeyondViewport: false,
+      });
+      let title = '';
+      try {
+        title = await page.title();
+      } catch {
+        // A navegação pode trocar o contexto logo após a captura.
+      }
+      lastPreview = {
+        capturedAt: new Date().toISOString(),
+        title,
+        url: page.url(),
+      };
+      return { image, ...lastPreview };
+    })();
+
+    try {
+      return await captureInProgress;
+    } finally {
+      captureInProgress = null;
+    }
+  }
+
   function getStats() {
     return {
       ...stats,
       uptimeSec: Math.round((Date.now() - stats.startedAt) / 1000),
+      currentUrl: page && !page.isClosed() ? page.url() : null,
+      previewCapturedAt: lastPreview?.capturedAt || null,
+      pageTitle: lastPreview?.title || '',
     };
   }
 
-  return { workerId, run, stop, getStats };
+  return { workerId, run, stop, getStats, capturePreview };
 }
 
 module.exports = { createWorker };

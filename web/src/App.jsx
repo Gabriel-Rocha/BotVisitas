@@ -8,6 +8,7 @@ import {
   saveConfig,
   setDashboardToken,
 } from './api.js';
+import CapturesPanel from './CapturesPanel.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
 
 const emptyMetrics = {
@@ -34,6 +35,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [tokenInput, setTokenInput] = useState(getDashboardToken());
   const [historyKey, setHistoryKey] = useState(0);
+  const [activeTab, setActiveTab] = useState('operation');
   const logEnd = useRef(null);
 
   const refresh = useCallback(async () => {
@@ -140,6 +142,25 @@ export default function App() {
         de terceiros.
       </div>
 
+      <nav className="tabs" aria-label="Seções do dashboard">
+        <button
+          type="button"
+          className={activeTab === 'operation' ? 'active' : ''}
+          onClick={() => setActiveTab('operation')}
+        >
+          Operação
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'preview' ? 'active' : ''}
+          onClick={() => setActiveTab('preview')}
+        >
+          Visualização
+        </button>
+      </nav>
+
+      {activeTab === 'operation' ? (
+        <>
       <section className="panel target-links">
         <h2>Links de destino</h2>
         <p className="muted">
@@ -400,6 +421,10 @@ export default function App() {
           onReuseTargets={(urls) => setTargetLinks((urls || []).join('\n'))}
         />
       </div>
+        </>
+      ) : (
+        <CapturesPanel status={status} />
+      )}
     </div>
   );
 }

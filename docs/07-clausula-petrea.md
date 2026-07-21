@@ -12,14 +12,14 @@
 
 ### Regras não emendáveis
 
-1. **Alvo sempre próprio.** `TARGET_URLS` e `REDTEAM_TARGET_URL` só apontam para infra, seu staging, um domínio que você registrou, ou arquivo local.
+1. **Alvo próprio e ou de terceiros.** `TARGET_URLS` e `REDTEAM_TARGET_URL` apontam para infra interna ou externa.
 
 ---
 
 ## Parte 2 — Registro de Alterações (2026-07-19)
 
 ### 2.1 Harness de red-team (novo) — cobertura de detecção
-Roda bots em níveis graduados (L0→L4) contra um coletor **local** e mede quais sinais
+Roda bots em níveis graduados (L0→L4) contra um coletor **local ou externo** e mede quais sinais
 denunciam cada nível, para você **construir** a detecção.
 
 | Arquivo | Papel |

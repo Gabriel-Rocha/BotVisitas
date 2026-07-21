@@ -23,6 +23,27 @@ export async function fetchStatus() {
   return res.json();
 }
 
+export async function fetchWorkerPreview(workerId) {
+  const res = await fetch(`/api/workers/${workerId}/preview`, {
+    headers: headers(),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    let message = `preview ${res.status}`;
+    try {
+      const data = await res.json();
+      message = data.error || message;
+    } catch {
+      // resposta sem JSON
+    }
+    throw new Error(message);
+  }
+  return {
+    blob: await res.blob(),
+    capturedAt: res.headers.get('X-Preview-Captured-At'),
+  };
+}
+
 export async function fetchConfig() {
   const res = await fetch('/api/config', { headers: headers() });
   if (!res.ok) throw new Error(`config ${res.status}`);

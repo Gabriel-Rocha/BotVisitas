@@ -80,6 +80,9 @@ function publicStatusSnapshot(config, loop, running) {
             iterations: w.iterations,
             proxyLabel: w.proxyLabel,
             uptimeSec: w.uptimeSec,
+            currentUrl: w.currentUrl,
+            pageTitle: w.pageTitle,
+            previewCapturedAt: w.previewCapturedAt,
           })),
         }
       : null,
