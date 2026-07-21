@@ -32,6 +32,8 @@ Ou: `npm run docker:up` → abra o painel em `:3847`.
 
 Default bot: `STRATEGY=dryRun`. Docs: [`docs/08-docker.md`](docs/08-docker.md) · [`docs/10-dashboard.md`](docs/10-dashboard.md).
 
+O Compose também sobe **PostgreSQL** (volume persistente) para o histórico do dashboard.
+
 ## Dashboard (local sem Docker)
 
 ```bash
@@ -138,6 +140,7 @@ Cada worker é um agente com perfil (`desktop` / `mobile` / `tablet`): viewport 
 src/
   index.js          # CLI entrypoint (loop)
   dashboard/        # API Express + botRuntime
+  db/               # Postgres (histórico: runs, logs, snapshots)
   config/           # env → config
   core/             # browser, session, worker, loop, devices, proxy
   strategies/       # dryRun (default), directLink

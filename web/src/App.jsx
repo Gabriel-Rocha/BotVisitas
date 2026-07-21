@@ -8,6 +8,7 @@ import {
   saveConfig,
   setDashboardToken,
 } from './api.js';
+import HistoryPanel from './HistoryPanel.jsx';
 
 const emptyMetrics = {
   ok: 0,
@@ -27,10 +28,12 @@ export default function App() {
     stats: emptyMetrics,
   });
   const [config, setConfig] = useState(null);
+  const [targetLinks, setTargetLinks] = useState('');
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [tokenInput, setTokenInput] = useState(getDashboardToken());
+  const [historyKey, setHistoryKey] = useState(0);
   const logEnd = useRef(null);
 
   const refresh = useCallback(async () => {
@@ -65,8 +68,15 @@ export default function App() {
     setBusy(true);
     setError('');
     try {
-      await botAction(action);
+      // Start/Restart enviam os links colados (runtime, não gravam no .env).
+      // Stop não precisa de body.
+      const body =
+        action === 'stop' ? undefined : { targetUrls: targetLinks };
+      await botAction(action, body);
       await refresh();
+      if (action === 'stop' || action === 'restart' || action === 'start') {
+        setHistoryKey((k) => k + 1);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -89,7 +99,6 @@ export default function App() {
         BROWSER_RESTART_EVERY: config.BROWSER_RESTART_EVERY,
         HEADLESS: config.HEADLESS,
         PROXY_ENABLED: config.PROXY_ENABLED,
-        TARGET_URLS: config.TARGET_URLS,
         BROWSE_PAGES_MIN: config.BROWSE_PAGES_MIN,
         BROWSE_PAGES_MAX: config.BROWSE_PAGES_MAX,
         INCLUDE_REFERRER: config.INCLUDE_REFERRER,
@@ -130,6 +139,29 @@ export default function App() {
         controla (localhost, staging, domínio seu). Não aponte para smartlinks de ads
         de terceiros.
       </div>
+
+      <section className="panel target-links">
+        <h2>Links de destino</h2>
+        <p className="muted">
+          Cole um link por linha (ou separados por vírgula). Valem só para esta
+          execução — <strong>não são gravados no .env</strong>. Vazio = usa o
+          <code> TARGET_URLS</code> do .env como fallback.
+        </p>
+        <textarea
+          className="links-area"
+          rows={4}
+          value={targetLinks}
+          disabled={running}
+          onChange={(e) => setTargetLinks(e.target.value)}
+          placeholder={'https://seu-dominio.com/pagina\nhttps://seu-dominio.com/outra'}
+        />
+        <p className="muted">
+          Em uso ({status.targetSource || 'none'}):{' '}
+          {status.targetUrls && status.targetUrls.length
+            ? status.targetUrls.join(' · ')
+            : '(nenhum)'}
+        </p>
+      </section>
 
       <div className="controls">
         <button
@@ -298,17 +330,6 @@ export default function App() {
                 </select>
               </div>
               <div className="field">
-                <label>TARGET_URLS</label>
-                <input
-                  value={config.TARGET_URLS}
-                  onChange={(e) => updateField('TARGET_URLS', e.target.value)}
-                  placeholder="só infra sua — salve ou edite o .env e dê Start"
-                />
-                <p className="muted">
-                  O worker entra no link e navega páginas internas do mesmo domínio.
-                </p>
-              </div>
-              <div className="field">
                 <label>BROWSE_PAGES_MIN</label>
                 <input
                   value={config.BROWSE_PAGES_MIN || '1'}
@@ -373,6 +394,11 @@ export default function App() {
             </button>
           </div>
         </section>
+
+        <HistoryPanel
+          refreshKey={historyKey}
+          onReuseTargets={(urls) => setTargetLinks((urls || []).join('\n'))}
+        />
       </div>
     </div>
   );

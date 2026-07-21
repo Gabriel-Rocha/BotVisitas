@@ -10,8 +10,18 @@ const { createBufferedLogger } = require('../dashboard/bufferedLogger');
  * Cria e sobe o loop do bot (sem handlers de sinal / process.exit).
  * Usado pelo CLI e pelo dashboard runtime.
  */
-function createBotSession({ logger } = {}) {
+function createBotSession({ logger, overrides = {} } = {}) {
   const config = loadConfig();
+
+  // Links colados no painel valem só para esta execução (não vão pro .env).
+  // Vazio/ausente = usa TARGET_URLS do .env como fallback.
+  if (Array.isArray(overrides.targetUrls) && overrides.targetUrls.length) {
+    config.targetUrls = overrides.targetUrls;
+    config.targetSource = 'frontend';
+  } else {
+    config.targetSource = config.targetUrls.length ? 'env' : 'none';
+  }
+
   const log = logger || createBufferedLogger(config.logLevel);
   const strategy = resolveStrategy(config.strategy);
 
@@ -23,7 +33,7 @@ function createBotSession({ logger } = {}) {
     log.info(`DEVICE_MIX=${config.deviceMix}`);
   }
   log.info(
-    `TARGET_URLS (${config.targetUrls.length}): ${
+    `TARGET_URLS [${config.targetSource}] (${config.targetUrls.length}): ${
       config.targetUrls.length ? config.targetUrls.join(' | ') : '(vazio)'
     }`
   );
@@ -52,6 +62,8 @@ function publicStatusSnapshot(config, loop, running) {
     proxyEnabled: Boolean(config.proxy?.enabled),
     proxyPoolSize: proxyPool.length,
     proxyLabels: proxyPool,
+    targetUrls: config.targetUrls || [],
+    targetSource: config.targetSource || (config.targetUrls?.length ? 'env' : 'none'),
     stats: stats
       ? {
           ok: stats.ok,
