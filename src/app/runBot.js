@@ -19,6 +19,9 @@ function createBotSession({ logger } = {}) {
   log.info(
     `strategy=${config.strategy} | headless=${config.headless} | proxy=${config.proxy.enabled} | concurrency=${config.concurrency}`
   );
+  if (config.deviceMix) {
+    log.info(`DEVICE_MIX=${config.deviceMix}`);
+  }
   log.info(
     `TARGET_URLS (${config.targetUrls.length}): ${
       config.targetUrls.length ? config.targetUrls.join(' | ') : '(vazio)'
@@ -45,6 +48,7 @@ function publicStatusSnapshot(config, loop, running) {
     strategy: config.strategy,
     headless: config.headless,
     concurrency: config.concurrency,
+    deviceMix: config.deviceMix || '',
     proxyEnabled: Boolean(config.proxy?.enabled),
     proxyPoolSize: proxyPool.length,
     proxyLabels: proxyPool,
@@ -55,8 +59,10 @@ function publicStatusSnapshot(config, loop, running) {
           iterations: stats.iterations,
           uptimeSec: stats.uptimeSec,
           concurrency: stats.concurrency,
+          devices: stats.devices || {},
           workers: (stats.workers || []).map((w) => ({
             workerId: w.workerId,
+            deviceType: w.deviceType || 'desktop',
             ok: w.ok,
             errors: w.errors,
             iterations: w.iterations,

@@ -9,13 +9,15 @@ const ENV_PATH = path.resolve(process.cwd(), '.env');
 const EDITABLE_KEYS = [
   'STRATEGY',
   'CONCURRENCY',
+  'DEVICE_MIX',
   'INTERVAL_MIN_SEC',
   'INTERVAL_MAX_SEC',
   'BROWSER_RESTART_EVERY',
   'HEADLESS',
   'PROXY_ENABLED',
   'TARGET_URLS',
-  'CLICK_SELECTOR',
+  'BROWSE_PAGES_MIN',
+  'BROWSE_PAGES_MAX',
   'INCLUDE_REFERRER',
 ];
 
@@ -47,13 +49,15 @@ function getSafeConfig() {
   return {
     STRATEGY: get('STRATEGY', 'dryRun'),
     CONCURRENCY: get('CONCURRENCY', '5'),
+    DEVICE_MIX: get('DEVICE_MIX', ''),
     INTERVAL_MIN_SEC: get('INTERVAL_MIN_SEC', '60'),
     INTERVAL_MAX_SEC: get('INTERVAL_MAX_SEC', '900'),
     BROWSER_RESTART_EVERY: get('BROWSER_RESTART_EVERY', '20'),
     HEADLESS: get('HEADLESS', 'true'),
     PROXY_ENABLED: get('PROXY_ENABLED', 'false'),
     TARGET_URLS: get('TARGET_URLS', ''),
-    CLICK_SELECTOR: get('CLICK_SELECTOR', ''),
+    BROWSE_PAGES_MIN: get('BROWSE_PAGES_MIN', '1'),
+    BROWSE_PAGES_MAX: get('BROWSE_PAGES_MAX', '3'),
     INCLUDE_REFERRER: get('INCLUDE_REFERRER', 'true'),
     PROXY_LIST_MASKED: proxyCount
       ? `${proxyCount} proxies configurados (ocultos)`

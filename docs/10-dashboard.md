@@ -47,7 +47,9 @@ Sem token: API aberta no bind configurado (local default `127.0.0.1`).
 | GET/PUT | `/api/config` | config segura (sem PROXY_LIST) |
 | GET | `/api/logs/stream` | SSE de logs |
 
-Config editável: STRATEGY, CONCURRENCY, intervalos, HEADLESS, PROXY_ENABLED, TARGET_URLS, CLICK_SELECTOR, INCLUDE_REFERRER.  
+Config editável: STRATEGY, CONCURRENCY, DEVICE_MIX, intervalos, HEADLESS, PROXY_ENABLED, TARGET_URLS, BROWSE_PAGES_MIN/MAX, INCLUDE_REFERRER.
+
+Workers na UI mostram badge de device (`desktop` / `mobile` / `tablet`) quando o bot está rodando.
 Não editável na UI: PROXY_LIST / PROXY_SERVER.
 
 Alterações de config valem no próximo Start/Restart.

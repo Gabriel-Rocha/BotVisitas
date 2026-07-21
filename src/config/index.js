@@ -67,6 +67,7 @@ function loadConfig() {
 
   const userAgents = loadJson('user-agents.json');
   const referrers = loadJson('referrers.json');
+  const deviceProfiles = loadJson('device-profiles.json');
 
   const config = {
     strategy: (process.env.STRATEGY || 'dryRun').trim(),
@@ -81,6 +82,10 @@ function loadConfig() {
     browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 20),
     concurrency: int(process.env.CONCURRENCY, 5),
 
+    // vazio = todos desktop via CONCURRENCY | ex.: desktop:2,mobile:3,tablet:1
+    deviceMix: (process.env.DEVICE_MIX || '').trim(),
+    deviceProfiles,
+
     viewport: {
       width: int(process.env.VIEWPORT_WIDTH, 1920),
       height: int(process.env.VIEWPORT_HEIGHT, 1080),
@@ -88,6 +93,8 @@ function loadConfig() {
 
     targetUrls: parseUrls(process.env.TARGET_URLS),
     maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 15),
+    browsePagesMin: int(process.env.BROWSE_PAGES_MIN, 1),
+    browsePagesMax: int(process.env.BROWSE_PAGES_MAX, 3),
     includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
     clickSelector: (process.env.CLICK_SELECTOR || '').trim() || null,
     targetAllowHosts: parseUrls(process.env.TARGET_ALLOW_HOSTS),
@@ -108,6 +115,9 @@ function loadConfig() {
 
   if (config.intervalMinSec > config.intervalMaxSec) {
     throw new Error('INTERVAL_MIN_SEC não pode ser maior que INTERVAL_MAX_SEC');
+  }
+  if (config.browsePagesMin > config.browsePagesMax) {
+    throw new Error('BROWSE_PAGES_MIN não pode ser maior que BROWSE_PAGES_MAX');
   }
 
   return config;

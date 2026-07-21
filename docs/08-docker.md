@@ -58,14 +58,16 @@ O `.env` controla o alvo:
 
 ```env
 TARGET_URLS=http://host.docker.internal:3000
-CLICK_SELECTOR="#cta"
+BROWSE_PAGES_MIN=0
+BROWSE_PAGES_MAX=1
 ```
 
 Quando tiver suas páginas, só troca:
 
 ```env
-TARGET_URLS=https://seu-dominio.com/pagina
-CLICK_SELECTOR="#seu-botao"
+TARGET_URLS=https://seu-dominio.com/
+BROWSE_PAGES_MIN=1
+BROWSE_PAGES_MAX=3
 ```
 
 A `testpage` no Compose só **serve** algo em `:3000` para o link local ser válido. Sem ela (ou sem outro servidor na 3000), dá `CONNECTION_REFUSED`.
@@ -110,7 +112,8 @@ Proxies Webshare são **remotos**: não alcançam `host.docker.internal:3000` (s
 PROXY_ENABLED=true
 CONCURRENCY=2
 TARGET_URLS=http://ipv4.webshare.io/
-CLICK_SELECTOR=
+BROWSE_PAGES_MIN=0
+BROWSE_PAGES_MAX=0
 ```
 
 No log: `Proxy adquirido: IP:porta` e `Resposta: status=200`.

@@ -5,10 +5,9 @@ Base modular reescrita do zero para colaboração e execução em vários ambien
 
 ## ⚖️ Uso — leia antes (cláusula pétrea)
 
-Este projeto automatiza navegação e cliques **exclusivamente para teste defensivo
-autorizado contra infraestrutura que VOCÊ controla** (localhost, seu staging, domínio
-seu, arquivos locais). **Não** aponte para smartlinks de ads ou páginas de terceiros —
-automatizar cliques nisso é **fraude de clique**, e está fora do escopo.
+Este projeto automatiza navegação e cliques. **Alvo sempre próprio:** `TARGET_URLS` e
+`REDTEAM_TARGET_URL` só apontam para infra, seu staging, um domínio que você registrou,
+ou arquivo local.
 
 Regra completa e **imutável**: [`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md).
 
@@ -73,7 +72,7 @@ npm start
 | Nome | Status |
 |------|--------|
 | `dryRun` | **Default** — valida o pipeline sem browser e sem links reais |
-| `directLink` | Acessa `TARGET_URLS` e clica; opt-in, **só contra infra sua** |
+| `directLink` | Acessa `TARGET_URLS` e clica;|
 
 ### Testando a `directLink` na sua própria página
 
@@ -115,10 +114,13 @@ Plano free Webshare (máx. 10) + workers paralelos — ver [`docs/09-proxies-web
 
 ```env
 PROXY_ENABLED=true
-CONCURRENCY=5          # cada worker = 1 Chromium + 1 IP exclusivo
+CONCURRENCY=5          # fallback se DEVICE_MIX vazio
+DEVICE_MIX=desktop:2,mobile:2,tablet:1   # soma manda; cada worker = 1 device
 ```
 
-`directLink` sem proxy força `CONCURRENCY=1`. RAM: ~150–300MB por Chromium.
+Cada worker é um agente com perfil (`desktop` / `mobile` / `tablet`): viewport + UA + touch coerentes. Ver [`docs/01-arquitetura.md`](docs/01-arquitetura.md).
+
+`directLink` sem proxy força 1 worker. RAM: ~150–300MB por Chromium.
 
 ## Documentação
 
@@ -137,10 +139,10 @@ src/
   index.js          # CLI entrypoint (loop)
   dashboard/        # API Express + botRuntime
   config/           # env → config
-  core/             # browser, session, worker, loop, proxy lease
+  core/             # browser, session, worker, loop, devices, proxy
   strategies/       # dryRun (default), directLink
   redteam/          # harness de cobertura de detecção
-  data/             # UAs, referrers
+  data/             # device-profiles, UAs, referrers
   utils/            # logger, random, sleep
 web/                # React + Vite (dashboard UI)
 scripts/
@@ -153,4 +155,3 @@ scripts/
 - Novo comportamento = nova strategy em `src/strategies/` + registro no `index.js`
 - Alvos (`TARGET_URLS`, harness) são **sempre** infra sua — ver a cláusula pétrea
 - Não commitar `.env` nem `logs/`
-```
