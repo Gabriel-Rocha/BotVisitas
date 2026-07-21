@@ -136,7 +136,13 @@ function createLoop({ config, strategy, logger }) {
     };
   }
 
-  return { run, stop, getStats };
+  async function captureWorkerPreview(workerId) {
+    const worker = workers.find((item) => item.workerId === workerId);
+    if (!worker) throw new Error(`Worker w${workerId} não encontrado`);
+    return worker.capturePreview();
+  }
+
+  return { run, stop, getStats, captureWorkerPreview };
 }
 
 module.exports = { createLoop, resolveConcurrency };

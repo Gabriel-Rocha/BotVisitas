@@ -48,6 +48,22 @@ function createApp() {
     res.json(botRuntime.getStatus());
   });
 
+  app.get('/api/workers/:workerId/preview', async (req, res) => {
+    const workerId = Number.parseInt(req.params.workerId, 10);
+    if (!Number.isInteger(workerId) || workerId < 0) {
+      return res.status(400).json({ ok: false, error: 'workerId inválido' });
+    }
+    try {
+      const preview = await botRuntime.captureWorkerPreview(workerId);
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.setHeader('X-Preview-Captured-At', preview.capturedAt);
+      return res.send(preview.image);
+    } catch (err) {
+      return res.status(409).json({ ok: false, error: err.message });
+    }
+  });
+
   app.post('/api/bot/start', async (req, res) => {
     try {
       const result = await botRuntime.start(req.body || {});

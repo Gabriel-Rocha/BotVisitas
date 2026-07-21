@@ -233,6 +233,13 @@ function getCurrentRunId() {
   return currentRunId;
 }
 
+async function captureWorkerPreview(workerId) {
+  if (!running || !loop) {
+    throw new Error('Bot não está em execução');
+  }
+  return loop.captureWorkerPreview(workerId);
+}
+
 module.exports = {
   start,
   stop,
@@ -240,4 +247,5 @@ module.exports = {
   getStatus,
   isRunning,
   getCurrentRunId,
+  captureWorkerPreview,
 };

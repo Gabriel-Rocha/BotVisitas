@@ -1,7 +1,7 @@
 # Dashboard UI — BotVisitas
 
-Painel de operação: monitorar workers, start/stop, config segura, logs ao vivo e
-**histórico persistente** (Postgres).
+Painel de operação: monitorar workers, start/stop, config segura, logs ao vivo,
+**visualização da página aberta** e histórico persistente (Postgres).
 
 ## Subir (local)
 
@@ -47,6 +47,7 @@ Sem token: API aberta no bind configurado (local default `127.0.0.1`).
 |--------|------|--------|
 | GET | `/api/health` | ping + status do Postgres |
 | GET | `/api/status` | running + stats/workers + `runId` |
+| GET | `/api/workers/:workerId/preview` | JPEG do viewport atual do worker |
 | POST | `/api/bot/start\|stop\|restart` | controla o loop in-process (body opcional: `targetUrls`) |
 | GET/PUT | `/api/config` | config segura (sem PROXY_LIST) |
 | GET | `/api/logs/stream` | SSE de logs |
@@ -61,6 +62,16 @@ Links de destino preferencialmente colados no painel (runtime, não gravam no `.
 Não editável na UI: PROXY_LIST / PROXY_SERVER / credenciais do banco.
 
 Alterações de config valem no próximo Start/Restart.
+
+## Visualização
+
+A aba **Visualização** captura o viewport atual de cada worker com browser e atualiza
+a imagem a cada 5 segundos enquanto estiver aberta. A URL, o título e o horário da
+captura aparecem junto da imagem.
+
+As capturas são entregues diretamente da memória, protegidas pelo mesmo
+`DASHBOARD_TOKEN` da API. Elas não são gravadas em disco nem nos snapshots do
+Postgres. Em `dryRun` não há visualização porque essa estratégia não abre Chromium.
 
 ## Histórico
 
