@@ -120,9 +120,11 @@ async function lookupGeo(ipOrHost) {
     return cached.data;
   }
 
+  const fields =
+    'status,message,country,countryCode,timezone,query,isp,org,as,proxy,hosting';
   const path = ipOrHost
-    ? `http://ip-api.com/json/${encodeURIComponent(ipOrHost)}?fields=status,message,country,countryCode,timezone,query`
-    : 'http://ip-api.com/json/?fields=status,message,country,countryCode,timezone,query';
+    ? `http://ip-api.com/json/${encodeURIComponent(ipOrHost)}?fields=${fields}`
+    : `http://ip-api.com/json/?fields=${fields}`;
 
   const raw = await httpGetJson(path);
   if (!raw || raw.status !== 'success') {
@@ -137,6 +139,12 @@ async function lookupGeo(ipOrHost) {
     countryCode: countryCode || null,
     timezoneId: raw.timezone || hint?.timezoneId || null,
     locale: hint?.locale || null,
+    isp: raw.isp || null,
+    org: raw.org || null,
+    as: raw.as || null,
+    // true = IP em blocklist de proxy/VPN/anon (causa clássica de "anonymous proxy detected")
+    isProxy: Boolean(raw.proxy),
+    isHosting: Boolean(raw.hosting),
     source: 'ip-api',
   };
 
@@ -168,10 +176,45 @@ async function resolveSessionLocale({
     acceptLanguage: acceptLanguageHeader(fallbackLocale),
     countryCode: null,
     ip: proxy?.host || null,
+    isProxy: null,
+    isHosting: null,
+    isp: null,
     source: 'fallback',
   };
 
-  if (!enabled) return fallback;
+  if (!enabled) {
+    // Mesmo com STEALTH_GEO_TZ=false, consulta reputação do IP do proxy (aviso / skip).
+    if (proxy?.host) {
+      try {
+        const geo = await lookupGeo(proxy.host);
+        if (logger && (geo.isProxy || geo.isHosting)) {
+          logger.warn(
+            `IP marcado como ${[
+              geo.isProxy ? 'proxy/VPN/anon' : null,
+              geo.isHosting ? 'hosting/datacenter' : null,
+            ]
+              .filter(Boolean)
+              .join(' + ')}` +
+              (geo.isp ? ` (${geo.isp})` : '') +
+              ' — sites de ads costumam responder "anonymous proxy detected". ' +
+              'Stealth de browser NÃO resolve isso: use proxy residencial/mobile. Ver docs/09-proxies-webshare.md'
+          );
+        }
+        return {
+          ...fallback,
+          countryCode: geo.countryCode,
+          ip: geo.ip,
+          isProxy: geo.isProxy,
+          isHosting: geo.isHosting,
+          isp: geo.isp,
+          source: 'reputation-only',
+        };
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  }
 
   try {
     const target = proxy?.host || null;
@@ -192,6 +235,9 @@ async function resolveSessionLocale({
       acceptLanguage: acceptLanguageHeader(locale),
       countryCode: geo.countryCode,
       ip: geo.ip,
+      isProxy: geo.isProxy,
+      isHosting: geo.isHosting,
+      isp: geo.isp,
       source: geo.source,
     };
 
@@ -202,6 +248,20 @@ async function resolveSessionLocale({
           (resolved.ip ? ` | ip=${resolved.ip}` : '') +
           (proxy ? ` | via=proxy` : ' | via=egress')
       );
+
+      if (resolved.isProxy || resolved.isHosting) {
+        logger.warn(
+          `IP marcado como ${[
+            resolved.isProxy ? 'proxy/VPN/anon' : null,
+            resolved.isHosting ? 'hosting/datacenter' : null,
+          ]
+            .filter(Boolean)
+            .join(' + ')}` +
+            (resolved.isp ? ` (${resolved.isp})` : '') +
+            ' — sites de ads costumam responder "anonymous proxy detected". ' +
+            'Stealth de browser NÃO resolve isso: use proxy residencial/mobile ou PROXY_ENABLED=false na sua rede doméstica. Ver docs/09-proxies-webshare.md'
+        );
+      }
     }
 
     return resolved;
@@ -211,6 +271,13 @@ async function resolveSessionLocale({
     }
     return fallback;
   }
+}
+
+/**
+ * true se o IP está em reputação de proxy/hosting (risco alto de "anonymous proxy detected").
+ */
+function isFlaggedAnonymousIp(geo) {
+  return Boolean(geo && (geo.isProxy || geo.isHosting));
 }
 
 function clearGeoCache() {
@@ -223,5 +290,6 @@ module.exports = {
   acceptLanguageHeader,
   lookupGeo,
   resolveSessionLocale,
+  isFlaggedAnonymousIp,
   clearGeoCache,
 };

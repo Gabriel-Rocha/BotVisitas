@@ -2,7 +2,7 @@
 
 const { launchBrowser, closeBrowser } = require('./browser');
 const { createSession, recreateSession } = require('./session');
-const { resolveSessionLocale } = require('./geo');
+const { resolveSessionLocale, isFlaggedAnonymousIp } = require('./geo');
 const { randomInt } = require('../utils/random');
 const { sleep } = require('../utils/sleep');
 
@@ -63,6 +63,40 @@ function createWorker({
     stats.proxyLabel = null;
   }
 
+  /**
+   * Adquire proxy; se PROXY_SKIP_FLAGGED, descarta IPs proxy/hosting e tenta outro.
+   * Plano free Webshare quase sempre é flagged — skip só faz sentido com residencial.
+   */
+  async function acquireUsableProxy() {
+    if (!proxyLease) return null;
+
+    const skipFlagged = Boolean(config.proxy?.skipFlagged);
+    const maxAttempts = Math.max(1, proxyLease.size || 1);
+    let lastHints = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      activeProxy = await acquireProxy();
+      lastHints = await resolveLocaleForProxy(activeProxy);
+
+      if (!skipFlagged || !isFlaggedAnonymousIp(lastHints)) {
+        return { proxy: activeProxy, hints: lastHints };
+      }
+
+      log(
+        'warn',
+        `PROXY_SKIP_FLAGGED: descartando ${activeProxy.label} (proxy=${lastHints.isProxy} hosting=${lastHints.isHosting})`
+      );
+      releaseProxy();
+      await sleep(200);
+    }
+
+    throw new Error(
+      'Nenhum proxy limpo no pool (todos marcados proxy/hosting). ' +
+        'Plano free/datacenter dispara "anonymous proxy detected". ' +
+        'Use proxies residenciais/mobile ou PROXY_SKIP_FLAGGED=false. Ver docs/09-proxies-webshare.md'
+    );
+  }
+
   async function resolveLocaleForProxy(proxy) {
     const hints = await resolveSessionLocale({
       proxy,
@@ -91,11 +125,13 @@ function createWorker({
       warn: (...a) => log('warn', ...a),
     });
 
+    let localeHints;
     if (!activeProxy && proxyLease) {
-      activeProxy = await acquireProxy();
+      const acquired = await acquireUsableProxy();
+      localeHints = acquired.hints;
+    } else {
+      localeHints = await resolveLocaleForProxy(activeProxy);
     }
-
-    const localeHints = await resolveLocaleForProxy(activeProxy);
 
     const launched = await launchBrowser(
       config,
@@ -138,11 +174,11 @@ function createWorker({
 
     if (proxyLease) {
       try {
-        activeProxy = await acquireProxy();
+        await acquireUsableProxy();
       } catch (err) {
-        log('warn', 'Sem proxy livre no restart — aguardando e tentando de novo:', err.message);
+        log('warn', 'Sem proxy limpo no restart — aguardando e tentando de novo:', err.message);
         await sleep(2000);
-        activeProxy = await acquireProxy();
+        await acquireUsableProxy();
       }
     }
 

@@ -5,6 +5,32 @@
 [Webshare](https://www.webshare.io/pricing) é **proxy** (HTTP/SOCKS), não VPN.
 O plano free oferece **10 proxies** — o código impõe `PROXY_MAX` ≤ 10.
 
+## ⚠️ "Anonymous proxy detected"
+
+Mensagem vinda do **site alvo** (ads/smartlink/anti-fraude), não bug do BotVisitas.
+
+Causa: o IP do proxy está em blocklist como **proxy anônimo / datacenter / hosting**.
+Planos free (Webshare etc.) usam quase sempre esse tipo de IP. O stealth de browser
+(UA, WebRTC, timezone) **não resolve** reputação de IP.
+
+Checagem rápida (exemplo): ip-api marca `proxy:true` / `hosting:true` nesses IPs.
+
+| Opção | Efeito |
+|-------|--------|
+| Proxy **residencial** ou **mobile** | Mitigação real — IP de ISP doméstico/carrier |
+| `PROXY_ENABLED=false` + rede doméstica | 1 IP limpo; `CONCURRENCY` força 1 sem proxy |
+| Continuar no free/datacenter | Esperar bloqueio em redes de ads |
+
+```env
+# Aviso no log quando o IP está flagged (sempre).
+# true = recusar IPs proxy/hosting (só faz sentido com pool residencial):
+PROXY_SKIP_FLAGGED=false
+```
+
+No log do worker: `IP marcado como proxy/VPN/anon + hosting/datacenter...`.
+
+---
+
 ## Concorrência (workers)
 
 Cada acesso paralelo com IP diferente precisa de **1 Chromium próprio** (proxy é por processo).
@@ -49,5 +75,6 @@ Credenciais **nunca** no código / Git.
 ## Segurança
 
 - Não commitar `.env`
-- **WebRTC:** proxy HTTP sozinho não esconde o IP real; `src/core/stealth.js`
-  bloqueia WebRTC nas páginas (obrigatório). Ver [`11-ofuscacao.md`](./11-ofuscacao.md).
+- **WebRTC:** proxy HTTP sozinho não esconde o IP real; Chromium usa
+  `disable_non_proxied_udp` + patch suave em `stealth.js` (sem throw).
+  Ver [`11-ofuscacao.md`](./11-ofuscacao.md).

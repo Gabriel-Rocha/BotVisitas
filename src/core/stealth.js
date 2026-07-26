@@ -14,15 +14,16 @@ const { sleep } = require('../utils/sleep');
  * 4. Comportamento humano (scroll suave, mouse, dwell)
  */
 
-/** Args extras do Chromium que reduzem fingerprint de bot. */
+/** Args extras do Chromium que reduzem fingerprint de bot (sem quebrar JS do site). */
 function getStealthLaunchArgs({ lang = 'pt-BR' } = {}) {
   const language = String(lang || 'pt-BR').trim() || 'pt-BR';
   return [
     '--disable-blink-features=AutomationControlled',
-    '--disable-features=IsolateOrigins,site-per-process',
+    // Evita vazamento de IP local via WebRTC sem derrubar APIs usadas pelo site.
+    '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+    '--enforce-webrtc-ip-permission-check',
     `--lang=${language}`,
     '--disable-infobars',
-    '--window-position=0,0',
   ];
 }
 
@@ -73,7 +74,7 @@ function buildRealisticHeaders(userAgent, { isMobile = false, acceptLanguage = n
 /**
  * Injeta patches antes de qualquer script da página.
  * - Esconde navigator.webdriver
- * - Bloqueia WebRTC (vazamento do IP real atrás de proxy)
+ * - Reduz vazamento WebRTC sem quebrar o JS do site (não lança throw)
  * - Suaviza chrome.runtime / permissions
  * - languages alinhados ao locale da região do IP
  */
@@ -92,23 +93,59 @@ async function applyPageStealth(page, { languages = ['pt-BR', 'pt', 'en-US', 'en
         // ignore
       }
 
-      // WebRTC: sem isso o site pode descobrir o IP real mesmo com proxy HTTP.
+      // WebRTC seguro: remove iceServers / host candidates — NÃO lança erro
+      // (throw em RTCPeerConnection ou getUserMedia quebra o JS de muitos sites).
       try {
-        const block = () => {
-          throw new DOMException('Permission denied', 'NotAllowedError');
+        const wrapPeerConnection = (Original) => {
+          if (!Original) return Original;
+
+          const Wrapped = function (...args) {
+            const config = args[0] && typeof args[0] === 'object' ? { ...args[0] } : {};
+            config.iceServers = [];
+            args[0] = config;
+            // eslint-disable-next-line new-cap
+            const pc = new Original(...args);
+
+            try {
+              const origAdd = pc.addIceCandidate?.bind(pc);
+              if (origAdd) {
+                pc.addIceCandidate = function (candidate, ...rest) {
+                  const c =
+                    candidate && typeof candidate === 'object'
+                      ? candidate.candidate || candidate
+                      : candidate;
+                  if (typeof c === 'string' && / typ host /.test(c)) {
+                    return Promise.resolve();
+                  }
+                  return origAdd(candidate, ...rest);
+                };
+              }
+            } catch {
+              // ignore
+            }
+
+            return pc;
+          };
+
+          Wrapped.prototype = Original.prototype;
+          try {
+            Object.setPrototypeOf(Wrapped, Original);
+          } catch {
+            // ignore
+          }
+          try {
+            Object.defineProperty(Wrapped, 'name', { value: 'RTCPeerConnection' });
+          } catch {
+            // ignore
+          }
+          return Wrapped;
         };
+
         if (window.RTCPeerConnection) {
-          window.RTCPeerConnection = new Proxy(window.RTCPeerConnection, {
-            construct() {
-              block();
-            },
-          });
+          window.RTCPeerConnection = wrapPeerConnection(window.RTCPeerConnection);
         }
         if (window.webkitRTCPeerConnection) {
           window.webkitRTCPeerConnection = window.RTCPeerConnection;
-        }
-        if (navigator.mediaDevices?.getUserMedia) {
-          navigator.mediaDevices.getUserMedia = block;
         }
       } catch {
         // ignore

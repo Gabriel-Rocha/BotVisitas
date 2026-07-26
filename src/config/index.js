@@ -105,6 +105,8 @@ function loadConfig() {
       server: (process.env.PROXY_SERVER || '').trim() || null,
       maxProxies: Math.min(int(process.env.PROXY_MAX, FREE_PLAN_MAX), FREE_PLAN_MAX),
       rotate: (process.env.PROXY_ROTATE || 'roundRobin').trim(),
+      // true = recusa IPs marcados proxy/hosting (plano free Webshare quase todo falha)
+      skipFlagged: bool(process.env.PROXY_SKIP_FLAGGED, false),
     },
 
     userAgents,

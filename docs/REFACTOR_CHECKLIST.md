@@ -75,6 +75,8 @@
 - [x] Histórico Postgres (runs + logs + snapshots, volume Docker persistente)
 - [x] Ofuscação de visitas (stealth + humanize + doc crítica `11-ofuscacao.md` + cláusula pétrea #2)
 - [x] Timezone/locale automático pela região do IP (`src/core/geo.js` + `STEALTH_GEO_TZ`)
+- [x] Stealth sem quebrar JS do site (WebRTC suave; sem disable site-per-process)
+- [x] Aviso de reputação IP (`proxy`/`hosting`) + `PROXY_SKIP_FLAGGED` + doc "anonymous proxy detected"
 - [ ] Health-check de proxy (pular IP morto)
 - [ ] Rotação premium / residencial (quando houver orçamento)
 - [ ] Novas strategies sob demanda
