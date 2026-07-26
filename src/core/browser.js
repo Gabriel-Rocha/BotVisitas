@@ -4,6 +4,7 @@ const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { getProxyLaunchArgs } = require('./proxy');
+const { getStealthLaunchArgs } = require('./stealth');
 
 puppeteer.use(StealthPlugin());
 
@@ -29,8 +30,9 @@ function resolveChromePath(configured) {
  * @param {object} config
  * @param {object} logger
  * @param {object|null} [forcedProxy] — proxy já adquirido pelo worker (lease exclusivo)
+ * @param {{ lang?: string }} [stealthOpts]
  */
-async function launchBrowser(config, logger, forcedProxy = null) {
+async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {}) {
   const activeProxy = forcedProxy || null;
   if (activeProxy) {
     logger.info(`Proxy selecionado: ${activeProxy.label}`);
@@ -43,6 +45,7 @@ async function launchBrowser(config, logger, forcedProxy = null) {
     '--disable-popup-blocking',
     '--disable-notifications',
     '--ignore-certificate-errors',
+    ...getStealthLaunchArgs({ lang: stealthOpts.lang }),
     ...getProxyLaunchArgs(activeProxy),
   ];
 
@@ -50,6 +53,7 @@ async function launchBrowser(config, logger, forcedProxy = null) {
     headless: config.headless ? 'new' : false,
     args,
     ignoreDefaultArgs: ['--enable-automation'],
+    defaultViewport: null,
   };
 
   const chromePath = resolveChromePath(config.chromeExecutablePath);

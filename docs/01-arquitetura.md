@@ -25,7 +25,9 @@ BotVisitas/
 │   │   ├── worker.js       # 1 Chromium + 1 proxy + 1 device profile
 │   │   ├── loop.js         # orquestra N workers / DEVICE_MIX
 │   │   ├── devices.js      # parse mix + personas
-│   │   └── proxy.js        # lease exclusivo (máx. 10)
+│   │   ├── proxy.js        # lease exclusivo (máx. 10)
+│   │   ├── geo.js          # IP → timezone/locale (ofuscação)
+│   │   └── stealth.js      # ofuscação (fingerprint + WebRTC + humanize)
 │   ├── strategies/
 │   │   ├── index.js        # registry
 │   │   ├── dryRun.js       # DEFAULT

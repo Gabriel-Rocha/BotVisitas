@@ -10,6 +10,7 @@
 
 - Config via `.env`
 - Browser stealth + session + loop + restart periódico
+- **Ofuscação** (`stealth.js` + `geo.js`): WebRTC block, headers, humanize, TZ/locale pelo IP
 - Graceful shutdown (SIGINT/SIGTERM)
 - Proxy stub (desligado)
 - Chromium embutido **ou** `CHROME_EXECUTABLE_PATH`

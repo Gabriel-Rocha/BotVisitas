@@ -49,3 +49,5 @@ Credenciais **nunca** no código / Git.
 ## Segurança
 
 - Não commitar `.env`
+- **WebRTC:** proxy HTTP sozinho não esconde o IP real; `src/core/stealth.js`
+  bloqueia WebRTC nas páginas (obrigatório). Ver [`11-ofuscacao.md`](./11-ofuscacao.md).

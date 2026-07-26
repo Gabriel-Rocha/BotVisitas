@@ -73,6 +73,8 @@
 - [x] Aba de visualização ao vivo do viewport por worker
 - [x] Aba Indicadores (métricas ao vivo + agregados Postgres)
 - [x] Histórico Postgres (runs + logs + snapshots, volume Docker persistente)
+- [x] Ofuscação de visitas (stealth + humanize + doc crítica `11-ofuscacao.md` + cláusula pétrea #2)
+- [x] Timezone/locale automático pela região do IP (`src/core/geo.js` + `STEALTH_GEO_TZ`)
 - [ ] Health-check de proxy (pular IP morto)
 - [ ] Rotação premium / residencial (quando houver orçamento)
 - [ ] Novas strategies sob demanda
@@ -87,3 +89,5 @@
 - Implementar proxy “de verdade” sem pedido
 - Monólitos copy-paste
 - Pastas fora da arquitetura documentada
+- Expor automação / IP real (regressão de ofuscação) — ver `docs/11-ofuscacao.md`
+- UAs de outro motor (Firefox/Safari) no Chromium

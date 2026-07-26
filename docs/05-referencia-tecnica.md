@@ -147,6 +147,16 @@ loop. Erros não tratados caem no `.catch` final (`[FATAL]`, exit 1).
 - **Hoje desligado de propósito** (custo). Ponto único de evolução para rotação /
   health-check / auth.
 
+### `src/core/stealth.js` — ofuscação (crítico)
+- Launch args anti-automation, patches de página (webdriver / WebRTC / languages),
+  headers + Client Hints coerentes com o UA, timezone/locale, scroll/mouse/dwell
+  e navegação por clique. Doc: [`11-ofuscacao.md`](./11-ofuscacao.md).
+- Usado por `browser.js`, `session.js` e `directLink.js`.
+
+### `src/core/geo.js` — IP → timezone/locale
+- Lookup (ip-api.com) do `proxy.host` ou do egress; cache 6h; fallback `.env`.
+- Flag `STEALTH_GEO_TZ` (default `true`). Integra em `worker.js` / `session.js`.
+
 ### `src/strategies/index.js` — registry
 - Mapa `{ name → strategy }`. `resolveStrategy(name)` retorna a strategy ou lança
   listando as disponíveis.
@@ -156,8 +166,9 @@ loop. Erros não tratados caem no `.catch` final (`[FATAL]`, exit 1).
   Ideal para validar config/loop em qualquer device sem Chromium.
 
 ### `src/strategies/directLink.js` — **opt-in, com browser**
-- `requiresBrowser: true`. Exige `TARGET_URLS`. Abre a URL de entrada, faz scroll/dwell
-  e navega `BROWSE_PAGES_MIN`..`BROWSE_PAGES_MAX` links **internos do mesmo host**.
+- `requiresBrowser: true`. Exige `TARGET_URLS`. Abre a URL de entrada, humaniza
+  (scroll/mouse/dwell via `stealth.js`) e navega `BROWSE_PAGES_MIN`..`BROWSE_PAGES_MAX`
+  links **internos do mesmo host** (preferindo clique em `<a>` a `goto`).
 - Sem clique forçado em CTA. Opt-in via `STRATEGY=directLink` (default: `dryRun`).
 
 ### `src/utils/`
@@ -199,6 +210,9 @@ Copie `.env.example` para `.env`. **Nunca** commite o `.env`.
 | `PROXY_ENABLED` | `false` | bool | Liga o proxy (experimental / custo) |
 | `PROXY_SERVER` | *(vazio)* | url | `http://user:pass@host:port` (obrigatório se enabled) |
 | `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`debug` | Nível de log |
+| `STEALTH_TIMEZONE` | `America/Sao_Paulo` | IANA | Fallback de timezone (se geo off/falhar) |
+| `STEALTH_LOCALE` | `pt-BR` | locale | Fallback de locale |
+| `STEALTH_GEO_TZ` | `true` | bool | Alinha TZ/locale à região do IP (proxy ou egress) |
 
 > `bool` aceita `1/true/yes/on` como verdadeiro. Se `INTERVAL_MIN_SEC >
 > INTERVAL_MAX_SEC`, a config lança erro no boot.

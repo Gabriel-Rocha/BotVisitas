@@ -15,6 +15,12 @@
 1. **Alvo próprio ou de terceiros (incl. smartlinks).** `TARGET_URLS` pode apontar
    para infra interna, externa ou smartlinks de ads.
 
+2. **Visita ofuscada (aparência humana).** Todo acesso a links deve ser ofuscado
+   ao máximo: não pode ficar aparente que é bot, nem que há uso de proxy/VPN.
+   O tráfego deve se comportar como visita normal. Detalhes operacionais:
+   [`11-ofuscacao.md`](./11-ofuscacao.md). Nenhuma tarefa, “atalho” ou modo
+   temporário revoga esta regra.
+
 ---
 
 ## Parte 2 — Registro de Alterações (2026-07-19)
@@ -45,3 +51,16 @@ Para memória do projeto, o que foi pedido e **sera** foi feito:
 - **Humanizar o loop de produção** `directLink`.
 - **Rotação de IP/região por clique** via VPN do Opera.
 - Apontar a `directLink` para **smartlink**
+
+### 2.5 Ofuscação de visitas (2026-07-26)
+- Regra pétrea #2 + doc [`11-ofuscacao.md`](./11-ofuscacao.md).
+- Módulo `src/core/stealth.js`: launch args, WebRTC block, headers, locale/TZ,
+  scroll/mouse/dwell, navegação por clique.
+- Integrado em `browser.js`, `session.js`, `directLink.js`.
+- UAs só Chromium em `device-profiles.json` (sem Firefox/Safari falso).
+- Env: `STEALTH_TIMEZONE`, `STEALTH_LOCALE`.
+
+### 2.6 Geo timezone automático (2026-07-26)
+- `src/core/geo.js`: IP (proxy ou egress) → timezone + locale + Accept-Language.
+- Default `STEALTH_GEO_TZ=true`; fallback `STEALTH_TIMEZONE` / `STEALTH_LOCALE`.
+- Worker aplica TZ antes do launch; stats expõem `timezoneId` / `geoCountry`.

@@ -110,6 +110,15 @@ function loadConfig() {
     userAgents,
     referrers,
 
+    // Ofuscação — visita deve parecer humana (ver docs/11-ofuscacao.md)
+    stealth: {
+      // Fallback quando STEALTH_GEO_TZ=false ou lookup falhar
+      timezoneId: (process.env.STEALTH_TIMEZONE || 'America/Sao_Paulo').trim(),
+      locale: (process.env.STEALTH_LOCALE || 'pt-BR').trim(),
+      // true = timezone/locale pela região do IP (proxy.host ou egress)
+      geoTz: bool(process.env.STEALTH_GEO_TZ, true),
+    },
+
     logLevel: (process.env.LOG_LEVEL || 'info').trim(),
   };
 

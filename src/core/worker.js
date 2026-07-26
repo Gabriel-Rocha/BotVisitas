@@ -2,6 +2,7 @@
 
 const { launchBrowser, closeBrowser } = require('./browser');
 const { createSession, recreateSession } = require('./session');
+const { resolveSessionLocale } = require('./geo');
 const { randomInt } = require('../utils/random');
 const { sleep } = require('../utils/sleep');
 
@@ -29,11 +30,15 @@ function createWorker({
     ok: 0,
     errors: 0,
     proxyLabel: null,
+    timezoneId: null,
+    locale: null,
+    geoCountry: null,
   };
 
   let browser = null;
   let page = null;
   let activeProxy = null;
+  let sessionLocale = null;
   let stopping = false;
   let captureInProgress = null;
   let lastPreview = null;
@@ -58,6 +63,25 @@ function createWorker({
     stats.proxyLabel = null;
   }
 
+  async function resolveLocaleForProxy(proxy) {
+    const hints = await resolveSessionLocale({
+      proxy,
+      fallbackTimezone: config.stealth?.timezoneId || 'America/Sao_Paulo',
+      fallbackLocale: config.stealth?.locale || 'pt-BR',
+      enabled: config.stealth?.geoTz !== false,
+      logger: {
+        info: (...a) => log('info', ...a),
+        warn: (...a) => log('warn', ...a),
+        debug: (...a) => log('debug', ...a),
+      },
+    });
+    sessionLocale = hints;
+    stats.timezoneId = hints.timezoneId;
+    stats.locale = hints.locale;
+    stats.geoCountry = hints.countryCode;
+    return hints;
+  }
+
   async function ensureBrowser() {
     if (!needsBrowser) return;
     if (browser && browser.isConnected()) return;
@@ -71,18 +95,32 @@ function createWorker({
       activeProxy = await acquireProxy();
     }
 
-    const launched = await launchBrowser(config, {
-      info: (...a) => log('info', ...a),
-      warn: (...a) => log('warn', ...a),
-      debug: (...a) => log('debug', ...a),
-    }, activeProxy);
+    const localeHints = await resolveLocaleForProxy(activeProxy);
+
+    const launched = await launchBrowser(
+      config,
+      {
+        info: (...a) => log('info', ...a),
+        warn: (...a) => log('warn', ...a),
+        debug: (...a) => log('debug', ...a),
+      },
+      activeProxy,
+      { lang: localeHints.locale }
+    );
 
     browser = launched.browser;
-    page = await createSession(browser, config, {
-      info: (...a) => log('info', ...a),
-      warn: (...a) => log('warn', ...a),
-      debug: (...a) => log('debug', ...a),
-    }, activeProxy, device);
+    page = await createSession(
+      browser,
+      config,
+      {
+        info: (...a) => log('info', ...a),
+        warn: (...a) => log('warn', ...a),
+        debug: (...a) => log('debug', ...a),
+      },
+      activeProxy,
+      device,
+      localeHints
+    );
   }
 
   async function restartBrowserWithNewProxy() {
@@ -155,10 +193,18 @@ function createWorker({
 
         if (needsBrowser) {
           try {
-            page = await recreateSession(browser, page, config, {
-              info: (...a) => log('info', ...a),
-              debug: (...a) => log('debug', ...a),
-            }, activeProxy, device);
+            page = await recreateSession(
+              browser,
+              page,
+              config,
+              {
+                info: (...a) => log('info', ...a),
+                debug: (...a) => log('debug', ...a),
+              },
+              activeProxy,
+              device,
+              sessionLocale
+            );
           } catch {
             await closeBrowser(browser, {
               info: (...a) => log('info', ...a),
@@ -166,6 +212,7 @@ function createWorker({
             });
             browser = null;
             page = null;
+            sessionLocale = null;
             releaseProxy();
           }
         }

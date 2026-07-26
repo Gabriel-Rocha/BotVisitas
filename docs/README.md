@@ -15,6 +15,7 @@ Documentação enxuta para reduzir tokens e manter coerência na refatoração.
 9. [08-docker.md](./08-docker.md) ← execução padrão no container
 10. [09-proxies-webshare.md](./09-proxies-webshare.md) ← plano free Webshare (máx. 10)
 11. [10-dashboard.md](./10-dashboard.md) ← painel web de operação
+12. **[11-ofuscacao.md](./11-ofuscacao.md)** ← 🔒 requisito crítico: visita humana / anti-detecção
 
 ## Regra
 

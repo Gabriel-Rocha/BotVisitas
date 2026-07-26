@@ -10,9 +10,9 @@ BotVisitas/
 ├── src/
 │   ├── index.js
 │   ├── config/index.js
-│   ├── core/{browser,session,loop,proxy}.js
+│   ├── core/{browser,session,loop,proxy,worker,devices,stealth,geo}.js
 │   ├── strategies/{index,dryRun,directLink}.js
-│   ├── data/{user-agents,referrers}.json
+│   ├── data/{user-agents,referrers,device-profiles}.json
 │   └── utils/{logger,random,sleep}.js
 ├── .env.example
 ├── package.json
@@ -20,3 +20,4 @@ BotVisitas/
 ```
 
 Nova pasta só com atualização deste arquivo + checklist + arquitetura.
+Ofuscação: ver [`11-ofuscacao.md`](./11-ofuscacao.md) (`src/core/stealth.js`).

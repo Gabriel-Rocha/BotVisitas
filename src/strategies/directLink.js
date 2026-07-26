@@ -2,9 +2,11 @@
 
 const { pick, randomInt } = require('../utils/random');
 const { sleep } = require('../utils/sleep');
+const { humanBrowsePause, navigateLikeHuman } = require('../core/stealth');
 
 /**
  * Direct link — visita TARGET_URLS e navega pelo site (mesmo host).
+ * Comportamento humanizado (ofuscação): scroll suave, mouse, dwell, clique em links.
  * Sem clique forçado em CTA.
  */
 
@@ -32,24 +34,6 @@ async function readPageMeta(page) {
   return { title, bodyLen, finalUrl: page.url() };
 }
 
-async function scrollAround(page) {
-  const steps = randomInt(2, 5);
-  for (let i = 0; i < steps; i += 1) {
-    const dy = randomInt(180, 720);
-    await page.evaluate((delta) => {
-      window.scrollBy({ top: delta, left: 0, behavior: 'instant' });
-    }, dy);
-    await sleep(randomInt(350, 1100));
-  }
-  // às vezes sobe um pouco (leitura)
-  if (Math.random() < 0.35) {
-    await page.evaluate(() => {
-      window.scrollBy({ top: -Math.round(window.innerHeight * 0.3), left: 0, behavior: 'instant' });
-    });
-    await sleep(randomInt(300, 800));
-  }
-}
-
 async function collectInternalLinks(page, hostname) {
   return page.evaluate((host) => {
     const seen = new Set();
@@ -74,26 +58,32 @@ async function collectInternalLinks(page, hostname) {
   }, hostname);
 }
 
-async function browsePage(page, url, logger, label) {
+async function browsePage(page, url, logger, label, { preferClick = false } = {}) {
   logger.info(`${label}: ${url}`);
-  const resp = await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+  let navVia = 'goto';
+  let resp = null;
+  if (preferClick) {
+    const nav = await navigateLikeHuman(page, url, logger);
+    navVia = nav.via;
+  } else {
+    resp = await page.goto(url, { waitUntil: 'domcontentloaded' });
+  }
+
   const status = resp ? resp.status() : null;
   await waitSettled(page);
 
-  const dwellSec = randomInt(4, 12);
-  logger.info(`Lendo página (~${dwellSec}s)...`);
-  await sleep(Math.min(dwellSec, 3) * 1000);
-  await scrollAround(page);
-  await sleep(Math.max(0, dwellSec - 3) * 1000);
+  const dwellSec = await humanBrowsePause(page, randomInt(5, 14));
+  logger.info(`Lendo página (~${dwellSec}s, via=${navVia})...`);
 
   const meta = await readPageMeta(page);
   logger.info(
-    `Resposta: status=${status} | title="${meta.title}" | final=${meta.finalUrl} | texto≈${meta.bodyLen} chars`
+    `Resposta: status=${status ?? 'n/a'} | title="${meta.title}" | final=${meta.finalUrl} | texto≈${meta.bodyLen} chars`
   );
   if (!meta.title && meta.bodyLen < 40) {
     logger.warn('Página quase vazia (title vazio + pouco texto).');
   }
-  return { status, ...meta };
+  return { status, navVia, ...meta };
 }
 
 async function run(page, { config, logger }) {
@@ -105,6 +95,8 @@ async function run(page, { config, logger }) {
     const ref = pick(config.referrers);
     logger.info(`Referrer: ${ref}`);
     await page.goto(ref, { waitUntil: 'domcontentloaded' });
+    // Pausa curta no referrer (humano não pula instantâneo).
+    await sleep(randomInt(1200, 3500));
   }
 
   const entryUrl = pick(config.targetUrls);
@@ -113,7 +105,7 @@ async function run(page, { config, logger }) {
   const visited = new Set();
   const path = [];
 
-  const first = await browsePage(page, entryUrl, logger, 'Entrada');
+  const first = await browsePage(page, entryUrl, logger, 'Entrada', { preferClick: false });
   visited.add(first.finalUrl.split('#')[0]);
   path.push(first.finalUrl);
 
@@ -135,7 +127,9 @@ async function run(page, { config, logger }) {
     const next = pick(candidates);
 
     try {
-      const step = await browsePage(page, next, logger, `Navegação ${i + 1}/${extraPages}`);
+      const step = await browsePage(page, next, logger, `Navegação ${i + 1}/${extraPages}`, {
+        preferClick: true,
+      });
       visited.add(step.finalUrl.split('#')[0]);
       path.push(step.finalUrl);
       navigated += 1;

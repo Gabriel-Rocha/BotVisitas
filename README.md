@@ -8,6 +8,9 @@ Base modular reescrita do zero para colaboração e execução em vários ambien
 Este projeto automatiza navegação e cliques. `TARGET_URLS` pode apontar para
 infra interna, externa ou **smartlinks** (próprios ou de terceiros).
 
+**Ofuscação (obrigatória):** cada acesso deve parecer visita humana — sem
+aparentar bot nem uso de proxy/VPN. Ver [`docs/11-ofuscacao.md`](docs/11-ofuscacao.md).
+
 Regra completa: [`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md).
 
 ## Requisitos
@@ -106,6 +109,7 @@ Cada worker é um agente com perfil (`desktop` / `mobile` / `tablet`): viewport 
 ## Documentação
 
 - ⚖️ **[`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md)** — fundacional (uso + registro de alterações)
+- 🔒 **[`docs/11-ofuscacao.md`](docs/11-ofuscacao.md)** — visita humana / anti-detecção (crítico)
 - [`docs/10-dashboard.md`](docs/10-dashboard.md) — painel web de operação
 - [`docs/08-docker.md`](docs/08-docker.md) — rodar sempre no container
 - [`docs/05-referencia-tecnica.md`](docs/05-referencia-tecnica.md) — referência técnica completa
@@ -120,7 +124,7 @@ src/
   dashboard/        # API Express + botRuntime
   db/               # Postgres (histórico: runs, logs, snapshots)
   config/           # env → config
-  core/             # browser, session, worker, loop, devices, proxy
+  core/             # browser, session, worker, loop, devices, proxy, stealth, geo
   strategies/       # dryRun (default), directLink
   data/             # device-profiles, UAs, referrers
   utils/            # logger, random, sleep
@@ -134,4 +138,5 @@ scripts/
 - Não hardcode URLs/keys — use `.env`
 - Novo comportamento = nova strategy em `src/strategies/` + registro no `index.js`
 - Alvos em `.env` / painel — ver a cláusula pétrea
+- Ofuscação: reutilizar `src/core/stealth.js`; não remover WebRTC block sem decisão documentada
 - Não commitar `.env` nem `logs/`
