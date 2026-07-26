@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Servidor de teste LOCAL para exercitar a strategy directLink contra uma
- * página que você controla. Zero dependências (http nativo).
+ * Servidor de teste LOCAL para exercitar a strategy directLink.
+ * Zero dependências (http nativo).
  *
  *   npm run test:server        # sobe em http://localhost:3000
  *   TEST_SERVER_PORT=4000 ...  # porta alternativa

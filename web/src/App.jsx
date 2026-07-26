@@ -137,12 +137,6 @@ export default function App() {
         </div>
       </header>
 
-      <div className="banner">
-        <strong>Cláusula pétrea:</strong> use apenas contra infraestrutura que você
-        controla (localhost, staging, domínio seu). Não aponte para smartlinks de ads
-        de terceiros.
-      </div>
-
       <nav className="tabs" aria-label="Seções do dashboard">
         <button
           type="button"

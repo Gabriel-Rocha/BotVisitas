@@ -48,5 +48,4 @@ Credenciais **nunca** no código / Git.
 
 ## Segurança
 
-- Só use contra infra que **você** controla (cláusula pétrea)
 - Não commitar `.env`

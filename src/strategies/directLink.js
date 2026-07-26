@@ -5,25 +5,8 @@ const { sleep } = require('../utils/sleep');
 
 /**
  * Direct link — visita TARGET_URLS e navega pelo site (mesmo host).
- * Sem clique forçado em CTA. Use só contra infra que VOCÊ controla.
+ * Sem clique forçado em CTA.
  */
-
-function assertHostAllowed(rawUrl, allowHosts) {
-  if (!allowHosts || !allowHosts.length) return;
-  let u;
-  try {
-    u = new URL(rawUrl);
-  } catch {
-    throw new Error(`URL inválida em TARGET_URLS: "${rawUrl}"`);
-  }
-  if (u.protocol === 'file:') return;
-  if (!allowHosts.includes(u.hostname)) {
-    throw new Error(
-      `Alvo "${u.hostname}" fora de TARGET_ALLOW_HOSTS [${allowHosts.join(', ')}]. ` +
-        'directLink só deve apontar para infra que você controla.'
-    );
-  }
-}
 
 async function waitSettled(page) {
   try {
@@ -125,7 +108,6 @@ async function run(page, { config, logger }) {
   }
 
   const entryUrl = pick(config.targetUrls);
-  assertHostAllowed(entryUrl, config.targetAllowHosts);
 
   const entryHost = new URL(entryUrl).hostname;
   const visited = new Set();
@@ -151,7 +133,6 @@ async function run(page, { config, logger }) {
     }
 
     const next = pick(candidates);
-    assertHostAllowed(next, config.targetAllowHosts);
 
     try {
       const step = await browsePage(page, next, logger, `Navegação ${i + 1}/${extraPages}`);

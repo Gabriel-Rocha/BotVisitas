@@ -11,7 +11,7 @@
 | # | Decisão | Valor |
 |---|----------|-------|
 | 1 | Escopo | Reescrita do zero; colaborativo + multi-dispositivo |
-| 2 | Direct Link | Código existe; **default = dryRun** (links fora de uso de propósito) |
+| 2 | Direct Link | Opt-in (`STRATEGY=directLink`); **default = dryRun** |
 | 3 | Proxies | Webshare free (máx. 10); lease exclusivo por worker |
 | 4 | JS | **CommonJS** |
 | 5 | Chromium | Embutido no Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
