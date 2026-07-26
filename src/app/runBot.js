@@ -38,10 +38,6 @@ function createBotSession({ logger, overrides = {} } = {}) {
     }`
   );
 
-  if (config.strategy === 'directLink') {
-    log.warn('Direct Link ativo — use apenas contra infra que você controla.');
-  }
-
   const loop = createLoop({ config, strategy, logger: log });
 
   return { config, strategy, logger: log, loop };

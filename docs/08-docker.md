@@ -129,4 +129,3 @@ No log: `Proxy adquirido: IP:porta` e `Resposta: status=200`.
 
 - Não commitar `.env`
 - Não rodar headed no container de produção (sem display)
-- Não apontar `TARGET_URLS` para infra de terceiros (cláusula pétrea)

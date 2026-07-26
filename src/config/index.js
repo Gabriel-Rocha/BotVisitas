@@ -98,7 +98,6 @@ function loadConfig() {
     browsePagesMax: int(process.env.BROWSE_PAGES_MAX, 3),
     includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
     clickSelector: (process.env.CLICK_SELECTOR || '').trim() || null,
-    targetAllowHosts: parseUrls(process.env.TARGET_ALLOW_HOSTS),
 
     proxy: {
       enabled: bool(process.env.PROXY_ENABLED, false),

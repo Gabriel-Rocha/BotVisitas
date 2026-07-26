@@ -3,19 +3,18 @@
 Bot multi-dispositivo de visitas automatizadas com Puppeteer.
 Base modular reescrita do zero para colaboração e execução em vários ambientes.
 
-## ⚖️ Uso — leia antes (cláusula pétrea)
+## ⚖️ Uso — cláusula pétrea
 
-Este projeto automatiza navegação e cliques. **Alvo sempre próprio:** `TARGET_URLS` e
-`REDTEAM_TARGET_URL` só apontam para infra, seu staging, um domínio que você registrou,
-ou arquivo local.
+Este projeto automatiza navegação e cliques. `TARGET_URLS` pode apontar para
+infra interna, externa ou **smartlinks** (próprios ou de terceiros).
 
-Regra completa e **imutável**: [`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md).
+Regra completa: [`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md).
 
 ## Requisitos
 
 - **Docker + Compose** (forma padrão de execução)
-- Node/npm só para desenvolvimento local ou harness headed
-- **Browser só é necessário** se a strategy exigir (ex.: `directLink`) ou para o harness
+- Node/npm só para desenvolvimento local
+- **Browser só é necessário** se a strategy exigir (ex.: `directLink`)
   - Default `dryRun` roda **sem** Chromium
   - No Docker: Chromium do sistema já vem na imagem
 
@@ -64,8 +63,6 @@ npm start
 | `npm start` | Sobe o bot no host (dev) |
 | `npm run start:dry` | Força `dryRun` (sem browser) |
 | `npm run start:headed` | Abre a janela do browser (debug no host) |
-| `npm run redteam` | Harness de cobertura de detecção (L0→L4, coletor local) |
-| `npm run redteam:headed` | Idem, com janela para acompanhar |
 | `npm run test:server` | Sobe página de teste local em `:3000` (botão `#cta`) |
 | `npm run browsers:install` | Baixa o Chromium do Puppeteer (só host) |
 
@@ -73,42 +70,24 @@ npm start
 
 | Nome | Status |
 |------|--------|
-| `dryRun` | **Default** — valida o pipeline sem browser e sem links reais |
-| `directLink` | Acessa `TARGET_URLS` e clica;|
+| `dryRun` | **Default** — valida o pipeline sem browser e sem abrir URLs |
+| `directLink` | Opt-in — acessa `TARGET_URLS` (smartlinks ou qualquer URL) |
 
-### Testando a `directLink` na sua própria página
+### Usando a `directLink`
 
 ```env
 STRATEGY=directLink
-TARGET_URLS=http://localhost:3000     # infra SUA (ou file:///caminho/test.html)
-CLICK_SELECTOR="#cta"                 # ASPAS se começar com "#" (senão o dotenv corta)
+TARGET_URLS=https://exemplo.com/smartlink
 INCLUDE_REFERRER=false
-INTERVAL_MIN_SEC=2
-INTERVAL_MAX_SEC=5
+INTERVAL_MIN_SEC=30
+INTERVAL_MAX_SEC=60
 ```
 
 ```bash
-npm run test:server     # terminal 1 — alvo local com botão #cta
-npm run start:headed    # terminal 2 — o bot acessa e clica
+npm run start:headed    # abre a janela p/ acompanhar (dev no host)
 ```
 
-No log: `status=200`, `title=...`, `Selector "#cta" encontrado — cliques: N`.
-Selector inexistente → `ok:false` (o teste sinaliza a falha em vez de clicar no vazio).
-Opcional: `TARGET_ALLOW_HOSTS` trava os hosts permitidos para a `directLink`.
-
-## Harness de red-team (teste defensivo)
-
-Mede se uma detecção de bots pegaria tráfego automatizado: roda níveis graduados de
-sofisticação (**L0** Naïve → **L4** Distribuído) contra um **coletor local** e coleta os
-sinais que um detector inspecionaria, gerando uma **matriz de cobertura** — para você
-**construir** a detecção. Nada sai da máquina (escuta só em `127.0.0.1`).
-
-```bash
-npm run redteam          # sweep + relatório em logs/redteam/
-npm run redteam:headed   # com janela, p/ ver L0 robótico → L3/L4 humanizado
-```
-
-Detalhes: [`docs/06-red-team-harness.md`](docs/06-red-team-harness.md).
+Fixture local opcional: `npm run test:server` + `TARGET_URLS=http://localhost:3000`.
 
 ## Proxies e concorrência
 
@@ -130,7 +109,6 @@ Cada worker é um agente com perfil (`desktop` / `mobile` / `tablet`): viewport 
 - [`docs/10-dashboard.md`](docs/10-dashboard.md) — painel web de operação
 - [`docs/08-docker.md`](docs/08-docker.md) — rodar sempre no container
 - [`docs/05-referencia-tecnica.md`](docs/05-referencia-tecnica.md) — referência técnica completa
-- [`docs/06-red-team-harness.md`](docs/06-red-team-harness.md) — o harness de detecção
 - [`docs/README.md`](docs/README.md) — índice e ordem de leitura
 - [`docs/REFACTOR_CHECKLIST.md`](docs/REFACTOR_CHECKLIST.md) — histórico do rebuild
 
@@ -144,7 +122,6 @@ src/
   config/           # env → config
   core/             # browser, session, worker, loop, devices, proxy
   strategies/       # dryRun (default), directLink
-  redteam/          # harness de cobertura de detecção
   data/             # device-profiles, UAs, referrers
   utils/            # logger, random, sleep
 web/                # React + Vite (dashboard UI)
@@ -156,5 +133,5 @@ scripts/
 
 - Não hardcode URLs/keys — use `.env`
 - Novo comportamento = nova strategy em `src/strategies/` + registro no `index.js`
-- Alvos (`TARGET_URLS`, harness) são **sempre** infra sua — ver a cláusula pétrea
+- Alvos em `.env` / painel — ver a cláusula pétrea
 - Não commitar `.env` nem `logs/`

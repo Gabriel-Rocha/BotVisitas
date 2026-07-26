@@ -15,7 +15,8 @@ Projeto pensado para **vários colaboradores** e execução em **vários disposi
 
 ## Default seguro
 
-`STRATEGY=dryRun` — não bate em direct links (links propositalmente fora de uso).
+`STRATEGY=dryRun` — valida o pipeline sem browser e sem abrir URLs.
+Para acessar links (incl. smartlinks), use `STRATEGY=directLink` + `TARGET_URLS`.
 
 ## Chromium — quando é necessário?
 

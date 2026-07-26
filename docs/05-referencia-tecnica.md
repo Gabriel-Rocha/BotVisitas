@@ -158,7 +158,7 @@ loop. Erros não tratados caem no `.catch` final (`[FATAL]`, exit 1).
 ### `src/strategies/directLink.js` — **opt-in, com browser**
 - `requiresBrowser: true`. Exige `TARGET_URLS`. Abre a URL de entrada, faz scroll/dwell
   e navega `BROWSE_PAGES_MIN`..`BROWSE_PAGES_MAX` links **internos do mesmo host**.
-- Sem clique forçado em CTA. Ativar só com decisão explícita, contra infra sua.
+- Sem clique forçado em CTA. Opt-in via `STRATEGY=directLink` (default: `dryRun`).
 
 ### `src/utils/`
 - `logger.js` — logger com níveis (`error`/`warn`/`info`/`debug`) e timestamp ISO;
@@ -169,7 +169,7 @@ loop. Erros não tratados caem no `.catch` final (`[FATAL]`, exit 1).
 
 ### `src/data/`
 - `device-profiles.json` — perfis `desktop` / `mobile` / `tablet` (viewport + UA + touch).
-- `user-agents.json` — pool legado de UAs desktop (fallback / red-team).
+- `user-agents.json` — pool legado de UAs desktop (fallback).
 - `referrers.json` — pool de referrers (Google, Wikipedia, Bing).
 
 ---
@@ -192,11 +192,10 @@ Copie `.env.example` para `.env`. **Nunca** commite o `.env`.
 | `DEVICE_MIX` | *(vazio)* | CSV | Ex.: `desktop:2,mobile:2` — soma manda; vazio = todos desktop |
 | `VIEWPORT_WIDTH` | `1920` | int | Fallback de largura (preferir perfis de device) |
 | `VIEWPORT_HEIGHT` | `1080` | int | Fallback de altura (preferir perfis de device) |
-| `TARGET_URLS` | *(vazio)* | CSV | URLs de entrada (`directLink`); **apenas infra sua** |
+| `TARGET_URLS` | *(vazio)* | CSV | URLs de entrada (`directLink`); smartlinks ou qualquer host |
 | `BROWSE_PAGES_MIN` | `1` | int | Mín. de páginas internas após a entrada |
 | `BROWSE_PAGES_MAX` | `3` | int | Máx. de páginas internas após a entrada |
 | `INCLUDE_REFERRER` | `true` | bool | Navega por um referrer antes do alvo |
-| `TARGET_ALLOW_HOSTS` | *(vazio)* | CSV | Allow-list de hosts p/ `directLink`; vazio = sem restrição |
 | `PROXY_ENABLED` | `false` | bool | Liga o proxy (experimental / custo) |
 | `PROXY_SERVER` | *(vazio)* | url | `http://user:pass@host:port` (obrigatório se enabled) |
 | `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`debug` | Nível de log |
@@ -230,19 +229,18 @@ STRATEGY=directLink
 TARGET_URLS=https://exemplo.com/a,https://exemplo.com/b
 ```
 
-### Testando a `directLink` na sua própria página
+### Receita `directLink`
 
 Fluxo: entra na URL → scroll/dwell → segue links internos do mesmo domínio.
 
 ```env
 STRATEGY=directLink
-TARGET_URLS=https://staging.seudominio/
+TARGET_URLS=https://exemplo.com/smartlink
 BROWSE_PAGES_MIN=1
 BROWSE_PAGES_MAX=3
 INCLUDE_REFERRER=false
 INTERVAL_MIN_SEC=30
 INTERVAL_MAX_SEC=60
-# TARGET_ALLOW_HOSTS=staging.seudominio
 ```
 
 ```bash
@@ -251,9 +249,6 @@ npm run start:headed    # abre a janela p/ acompanhar
 
 No log: `Entrada:`, `Links internos encontrados: N`, `Navegação 1/3:`, `Lendo página`.
 `Ctrl+C` encerra com shutdown gracioso.
-
-> `TARGET_URLS` deve apontar **só para infra que você controla** — não para
-> smartlinks de ads ou páginas de terceiros.
 
 Usar browser do sistema (opcional):
 
@@ -303,5 +298,3 @@ logando as `stats`.
 - `logs/` e `.env` são gitignored.
 - Idioma do time (docs/respostas): **português**.
 
-> **Aviso de uso:** automação de cliques/visitas pode violar termos de serviço de
-> plataformas de ads. Use apenas em contextos autorizados e de teste.

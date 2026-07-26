@@ -14,10 +14,10 @@
 - Proxy stub (desligado)
 - Chromium embutido **ou** `CHROME_EXECUTABLE_PATH`
 
-## O que NÃO está ativo de propósito
+## Opt-in (não é o default)
 
-- Direct links / smartlinks (código existe; não é default)
-- Rotação real de proxies
+- `directLink` / smartlinks — disponível via `STRATEGY=directLink` + `TARGET_URLS`
+- Rotação premium / residencial de proxies (plano free Webshare já está)
 
 ## Próximos passos naturais
 
