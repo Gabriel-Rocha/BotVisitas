@@ -14,6 +14,7 @@ const {
   getRun,
   listRunLogs,
   listRunSnapshots,
+  getMetricsSummary,
   assertUuid,
 } = require('../db');
 
@@ -46,6 +47,15 @@ function createApp() {
 
   app.get('/api/status', (_req, res) => {
     res.json(botRuntime.getStatus());
+  });
+
+  app.get('/api/metrics', async (_req, res) => {
+    try {
+      const summary = await getMetricsSummary();
+      res.json({ ok: true, ...summary });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 
   app.get('/api/workers/:workerId/preview', async (req, res) => {

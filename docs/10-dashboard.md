@@ -48,6 +48,7 @@ Sem token: API aberta no bind configurado (local default `127.0.0.1`).
 | GET | `/api/health` | ping + status do Postgres |
 | GET | `/api/status` | running + stats/workers + `runId` |
 | GET | `/api/workers/:workerId/preview` | JPEG do viewport atual do worker |
+| GET | `/api/metrics` | agregados históricos + status de disponibilidade do Postgres |
 | POST | `/api/bot/start\|stop\|restart` | controla o loop in-process (body opcional: `targetUrls`) |
 | GET/PUT | `/api/config` | config segura (sem PROXY_LIST) |
 | GET | `/api/logs/stream` | SSE de logs |
@@ -73,6 +74,13 @@ As capturas são entregues diretamente da memória, protegidas pelo mesmo
 `DASHBOARD_TOKEN` da API. Elas não são gravadas em disco nem nos snapshots do
 Postgres. Em `dryRun` não há visualização porque essa estratégia não abre Chromium.
 
+## Indicadores
+
+A aba **Indicadores** mostra métricas da sessão ao vivo (taxa de sucesso/erro,
+throughput OK/hora, uptime, workers, devices, URL atual) e agregados do Postgres
+(total histórico, últimas 24h, runs recentes). Endpoint: `GET /api/metrics`.
+Se o banco estiver offline, a aba continua com os indicadores ao vivo.
+
 ## Histórico
 
 Cada Start cria um `bot_runs`. Enquanto roda: logs assíncronos + snapshots a cada
@@ -86,4 +94,4 @@ fica indisponível (503).
 - `src/dashboard/server.js` — entrypoint (+ init DB)
 - `src/dashboard/botRuntime.js` — start/stop + lifecycle do run
 - `src/db/` — pool, schema, queries, fila de logs
-- `web/` — React + Vite (`HistoryPanel.jsx`)
+- `web/` — React + Vite (`HistoryPanel.jsx`, `MetricsPanel.jsx`, `CapturesPanel.jsx`)

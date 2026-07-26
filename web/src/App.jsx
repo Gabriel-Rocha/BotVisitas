@@ -10,6 +10,7 @@ import {
 } from './api.js';
 import CapturesPanel from './CapturesPanel.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
+import MetricsPanel from './MetricsPanel.jsx';
 
 const emptyMetrics = {
   ok: 0,
@@ -149,6 +150,13 @@ export default function App() {
           onClick={() => setActiveTab('operation')}
         >
           Operação
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'metrics' ? 'active' : ''}
+          onClick={() => setActiveTab('metrics')}
+        >
+          Indicadores
         </button>
         <button
           type="button"
@@ -422,9 +430,11 @@ export default function App() {
         />
       </div>
         </>
-      ) : (
-        <CapturesPanel status={status} />
-      )}
+      ) : null}
+
+      {activeTab === 'metrics' ? <MetricsPanel status={status} /> : null}
+
+      {activeTab === 'preview' ? <CapturesPanel status={status} /> : null}
     </div>
   );
 }

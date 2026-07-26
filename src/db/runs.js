@@ -175,6 +175,78 @@ async function listRunSnapshots(runId, { limit = 200 } = {}) {
   return result.rows;
 }
 
+/** Agregados para a aba Indicadores (sem payloads pesados). */
+async function getMetricsSummary() {
+  if (!isAvailable()) {
+    return {
+      available: false,
+      totals: null,
+      byStatus: {},
+      last24h: null,
+      recent: [],
+    };
+  }
+
+  const [totalsRes, statusRes, dayRes, recentRes] = await Promise.all([
+    query(
+      `SELECT
+         COUNT(*)::int AS runs,
+         COALESCE(SUM(ok_total), 0)::int AS ok,
+         COALESCE(SUM(errors_total), 0)::int AS errors,
+         COALESCE(SUM(iterations_total), 0)::int AS iterations,
+         COALESCE(AVG(NULLIF(iterations_total, 0)), 0)::float AS avg_iterations
+       FROM bot_runs`
+    ),
+    query(
+      `SELECT status, COUNT(*)::int AS count
+       FROM bot_runs
+       GROUP BY status`
+    ),
+    query(
+      `SELECT
+         COUNT(*)::int AS runs,
+         COALESCE(SUM(ok_total), 0)::int AS ok,
+         COALESCE(SUM(errors_total), 0)::int AS errors,
+         COALESCE(SUM(iterations_total), 0)::int AS iterations
+       FROM bot_runs
+       WHERE started_at >= now() - interval '24 hours'`
+    ),
+    query(
+      `SELECT id, status, strategy, started_at, ended_at,
+              ok_total, errors_total, iterations_total, proxy_enabled
+       FROM bot_runs
+       ORDER BY started_at DESC
+       LIMIT 8`
+    ),
+  ]);
+
+  const totals = totalsRes.rows[0] || {};
+  const byStatus = {};
+  for (const row of statusRes.rows) {
+    byStatus[row.status] = row.count;
+  }
+  const last24h = dayRes.rows[0] || {};
+
+  return {
+    available: true,
+    totals: {
+      runs: totals.runs || 0,
+      ok: totals.ok || 0,
+      errors: totals.errors || 0,
+      iterations: totals.iterations || 0,
+      avgIterations: Math.round(Number(totals.avg_iterations || 0) * 10) / 10,
+    },
+    byStatus,
+    last24h: {
+      runs: last24h.runs || 0,
+      ok: last24h.ok || 0,
+      errors: last24h.errors || 0,
+      iterations: last24h.iterations || 0,
+    },
+    recent: recentRes.rows,
+  };
+}
+
 module.exports = {
   createRun,
   finishRun,
@@ -184,5 +256,6 @@ module.exports = {
   getRun,
   listRunLogs,
   listRunSnapshots,
+  getMetricsSummary,
   assertUuid,
 };
