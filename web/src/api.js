@@ -79,6 +79,13 @@ export async function fetchHealth() {
   return res.json();
 }
 
+export async function fetchMetrics() {
+  const res = await fetch('/api/metrics', { headers: headers() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `metrics ${res.status}`);
+  return data;
+}
+
 export async function fetchRuns({ limit = 20, offset = 0, status } = {}) {
   const q = new URLSearchParams({
     limit: String(limit),
