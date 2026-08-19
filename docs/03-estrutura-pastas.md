@@ -20,3 +20,4 @@ BotVisitas/
 ```
 
 Nova pasta só com atualização deste arquivo + checklist + arquitetura.
+Ofuscação: ver [`11-ofuscacao.md`](./11-ofuscacao.md) (`src/core/stealth.js`).

@@ -5,7 +5,7 @@ const path = require('path');
 const dotenv = require('dotenv');
 const { parseProxyList } = require('../core/proxy');
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+reloadEnv();
 
 function bool(value, fallback) {
   if (value === undefined || value === '') return fallback;
@@ -36,6 +36,8 @@ function parseUrls(raw) {
 }
 
 function loadConfig() {
+  reloadEnv();
+
   const userAgents = loadJson('user-agents.json');
   const referrers = loadJson('referrers.json');
   const browserProfiles = loadJson('browser-profiles.json');
@@ -68,6 +70,7 @@ function loadConfig() {
     targetUrls: parseUrls(process.env.TARGET_URLS),
     maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 0),
     includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
+    clickSelector: (process.env.CLICK_SELECTOR || '').trim() || null,
 
     proxy: {
       enabled: bool(process.env.PROXY_ENABLED, false),
@@ -98,6 +101,15 @@ function loadConfig() {
     referrers,
     browserProfiles,
 
+    // Ofuscação — visita deve parecer humana (ver docs/11-ofuscacao.md)
+    stealth: {
+      // Fallback quando STEALTH_GEO_TZ=false ou lookup falhar
+      timezoneId: (process.env.STEALTH_TIMEZONE || 'America/Sao_Paulo').trim(),
+      locale: (process.env.STEALTH_LOCALE || 'pt-BR').trim(),
+      // true = timezone/locale pela região do IP (proxy.host ou egress)
+      geoTz: bool(process.env.STEALTH_GEO_TZ, true),
+    },
+
     logLevel: (process.env.LOG_LEVEL || 'info').trim(),
   };
 
@@ -114,4 +126,4 @@ function loadConfig() {
   return config;
 }
 
-module.exports = { loadConfig };
+module.exports = { loadConfig, reloadEnv, parseUrls, ENV_PATH };

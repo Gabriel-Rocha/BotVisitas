@@ -1,7 +1,17 @@
 # BotVisitas
 
 Bot multi-dispositivo de visitas automatizadas com Puppeteer.
-Base reescrita do zero para colaboração e execução em vários ambientes.
+Base modular reescrita do zero para colaboração e execução em vários ambientes.
+
+## ⚖️ Uso — cláusula pétrea
+
+Este projeto automatiza navegação e cliques. `TARGET_URLS` pode apontar para
+infra interna, externa ou **smartlinks** (próprios ou de terceiros).
+
+**Ofuscação (obrigatória):** cada acesso deve parecer visita humana — sem
+aparentar bot nem uso de proxy/VPN. Ver [`docs/11-ofuscacao.md`](docs/11-ofuscacao.md).
+
+Regra completa: [`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md).
 
 ## Requisitos
 
@@ -12,7 +22,7 @@ Base reescrita do zero para colaboração e execução em vários ambientes.
   - fallback: Chromium do Puppeteer (`npm run browsers:install`)
   - `dryRun` é opt-in e roda sem Chromium
 
-## Setup rápido
+## Setup rápido (Docker — recomendado)
 
 ```bash
 cp .env.example .env
@@ -71,37 +81,49 @@ Opcional — forçar browser do sistema:
 CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome
 ```
 
-## Estratégias
+Fixture local opcional: `npm run test:server` + `TARGET_URLS=http://localhost:3000`.
 
 | Nome | Status |
 |------|--------|
 | `directLink` | **Default** — acessa `TARGET_URLS` com stealth |
 | `dryRun` | Opt-in — valida pipeline sem smartlinks |
 
-## Proxies
+Cada worker é um agente com perfil (`desktop` / `mobile` / `tablet`): viewport + UA + touch coerentes. Ver [`docs/01-arquitetura.md`](docs/01-arquitetura.md).
 
 `PROXY_ENABLED=true` e `PROXY_SERVER` / `PROXY_SERVERS` (lista). Sem persistência, a lista entra em rodízio a cada visitante.
 Ver `src/core/proxy.js`.
 
-## Documentação (contexto p/ IA e humanos)
+## Documentação
 
-Comece por [`docs/REFACTOR_CHECKLIST.md`](docs/REFACTOR_CHECKLIST.md).
+- ⚖️ **[`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md)** — fundacional (uso + registro de alterações)
+- 🔒 **[`docs/11-ofuscacao.md`](docs/11-ofuscacao.md)** — visita humana / anti-detecção (crítico)
+- [`docs/10-dashboard.md`](docs/10-dashboard.md) — painel web de operação
+- [`docs/08-docker.md`](docs/08-docker.md) — rodar sempre no container
+- [`docs/05-referencia-tecnica.md`](docs/05-referencia-tecnica.md) — referência técnica completa
+- [`docs/README.md`](docs/README.md) — índice e ordem de leitura
+- [`docs/REFACTOR_CHECKLIST.md`](docs/REFACTOR_CHECKLIST.md) — histórico do rebuild
 
 ## Estrutura
 
 ```
 src/
-  index.js          # entrypoint
+  index.js          # CLI entrypoint (loop)
+  dashboard/        # API Express + botRuntime
+  db/               # Postgres (histórico: runs, logs, snapshots)
   config/           # env → config
   core/             # browser, session, loop, proxy, identity, stealth, human
   strategies/       # dryRun, directLink
   data/             # perfis, UAs, referrers
   utils/            # logger, random, sleep
+web/                # React + Vite (dashboard UI)
+scripts/
+  test-server.js    # página de teste local :3000
 ```
 
 ## Colaborando
 
 - Não hardcode URLs/keys — use `.env`
-- Nova comportamento = nova strategy em `src/strategies/` + registro no `index.js`
-- Atualize o checklist em `docs/` ao concluir tarefas
+- Novo comportamento = nova strategy em `src/strategies/` + registro no `index.js`
+- Alvos em `.env` / painel — ver a cláusula pétrea
+- Ofuscação: reutilizar `src/core/stealth.js`; não remover WebRTC block sem decisão documentada
 - Não commitar `.env` nem `logs/`

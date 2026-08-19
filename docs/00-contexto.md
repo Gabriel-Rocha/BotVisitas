@@ -34,3 +34,9 @@ npm run browsers:install
 ## Objetivo
 
 Base limpa, modular, configurável por `.env`, fácil de rodar em macOS / Linux / Windows.
+
+## Ofuscação (crítico)
+
+Todo acesso a links deve parecer visita humana: sem sinais óbvios de bot e sem
+expor uso de proxy/VPN. Ver [`11-ofuscacao.md`](./11-ofuscacao.md) e a cláusula
+pétrea #2 em [`07-clausula-petrea.md`](./07-clausula-petrea.md).

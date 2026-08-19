@@ -22,6 +22,12 @@
 - Sem persistência, proxy em rodízio por visitante; com persistência, preso à sessão
 
 
+## Ofuscação
+
+- Só via `src/core/stealth.js` (+ plugin stealth no `browser.js`)
+- Visita deve parecer humana — ver [`11-ofuscacao.md`](./11-ofuscacao.md)
+- Não remover bloqueio WebRTC / patches sem decisão documentada
+
 ## Multi-device / colaboradores
 
 - Sem paths absolutos de um único SO

@@ -1,9 +1,8 @@
 'use strict';
 
+const { createBotSession } = require('./app/runBot');
+const { createBufferedLogger } = require('./dashboard/bufferedLogger');
 const { loadConfig } = require('./config');
-const { createLogger } = require('./utils/logger');
-const { resolveStrategy } = require('./strategies');
-const { createLoop } = require('./core/loop');
 
 async function main() {
   const config = loadConfig();

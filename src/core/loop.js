@@ -110,7 +110,46 @@ function createLoop({ config, strategy, logger }) {
     await maybeRestartBrowser();
   }
 
+  return null; // sem cap
+}
+
+function createLoop({ config, strategy, logger }) {
+  const workers = [];
+  let proxyLease = null;
+  let stopping = false;
+  const startedAt = Date.now();
+  let deviceSummary = {};
+
   async function run() {
+    assertProxyReady(config.proxy, logger);
+
+    const proxyCap = resolveProxyCap(config, strategy);
+    const fallbackConcurrency = resolveConcurrency(config, strategy, logger);
+
+    const { types, fromMix } = assignDeviceTypes({
+      deviceMixRaw: config.deviceMix,
+      concurrency: fallbackConcurrency,
+      maxWorkers: proxyCap != null ? proxyCap : undefined,
+      logger,
+    });
+
+    // Sem mix: resolveConcurrency já aplicou caps.
+    // Com mix: assignDeviceTypes já truncou ao proxyCap.
+    if (!fromMix && types.length !== fallbackConcurrency) {
+      // não deve acontecer
+    }
+
+    deviceSummary = summarizeDevices(types);
+
+    if (config.proxy?.enabled) {
+      const { pool } = buildProxyPool(config.proxy);
+      proxyLease = createProxyLease(pool);
+    }
+
+    const mixLabel = Object.entries(deviceSummary)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(', ');
+
     logger.info(
       `Loop iniciado | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'} | stealth=${config.stealth.enabled} | visitantes=${rotate ? 'novos a cada visita' : 'sessão persistente'}`
     );
@@ -133,9 +172,12 @@ function createLoop({ config, strategy, logger }) {
         await sleep(waitMs);
       }
     }
+
+    await Promise.all(workers.map((w) => w.run()));
   }
 
   async function stop() {
+    if (stopping) return;
     stopping = true;
     logger.info('Encerrando loop...', JSON.stringify(getStats()));
     if (needsBrowser) {
@@ -145,13 +187,25 @@ function createLoop({ config, strategy, logger }) {
   }
 
   function getStats() {
+    const parts = workers.map((w) => w.getStats());
     return {
-      ...stats,
-      uptimeSec: Math.round((Date.now() - stats.startedAt) / 1000),
+      concurrency: workers.length,
+      uptimeSec: Math.round((Date.now() - startedAt) / 1000),
+      ok: parts.reduce((s, p) => s + p.ok, 0),
+      errors: parts.reduce((s, p) => s + p.errors, 0),
+      iterations: parts.reduce((s, p) => s + p.iterations, 0),
+      devices: deviceSummary,
+      workers: parts,
     };
   }
 
-  return { run, stop, getStats };
+  async function captureWorkerPreview(workerId) {
+    const worker = workers.find((item) => item.workerId === workerId);
+    if (!worker) throw new Error(`Worker w${workerId} não encontrado`);
+    return worker.capturePreview();
+  }
+
+  return { run, stop, getStats, captureWorkerPreview };
 }
 
-module.exports = { createLoop };
+module.exports = { createLoop, resolveConcurrency };

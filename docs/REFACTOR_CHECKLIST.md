@@ -100,3 +100,5 @@
 - Fingir Firefox/UA móvel no Chromium
 - Monólitos copy-paste
 - Pastas fora da arquitetura documentada
+- Expor automação / IP real (regressão de ofuscação) — ver `docs/11-ofuscacao.md`
+- UAs de outro motor (Firefox/Safari) no Chromium

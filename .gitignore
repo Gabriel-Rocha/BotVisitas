@@ -32,12 +32,20 @@ yarn-error.log*
 Thumbs.db
 Desktop.ini
 
+# Docker (artefatos locais raros)
+*.dockerignore.local
+
 # Editores / IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+
+# Ferramentas locais (BMAD / assistentes) — ambiente local, não versionar
+.claude/
+.cursor/_bmad/
+_bmad/
 
 # Testes / coverage
 coverage/
@@ -49,3 +57,5 @@ build/
 tmp/
 temp/
 *.tmp
+web/dist/
+web/node_modules/

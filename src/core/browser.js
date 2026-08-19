@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { sessionPaths } = require('./identity');
@@ -43,7 +44,7 @@ async function launchBrowser(config, logger, identity) {
 
   const browser = await puppeteer.launch(options);
   logger.info('Browser iniciado');
-  return browser;
+  return { browser, activeProxy };
 }
 
 async function closeBrowser(browser, logger) {
@@ -56,4 +57,4 @@ async function closeBrowser(browser, logger) {
   }
 }
 
-module.exports = { launchBrowser, closeBrowser };
+module.exports = { launchBrowser, closeBrowser, resolveChromePath };
