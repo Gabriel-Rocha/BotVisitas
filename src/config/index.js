@@ -3,7 +3,40 @@
 const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
-const { parseProxyList } = require('../core/proxy');
+const { parseProxyList, FREE_PLAN_MAX } = require('../core/proxy');
+
+const ENV_PATH = path.resolve(process.cwd(), '.env');
+
+/** Vars injetadas pelo Docker Compose não devem ser sobrescritas pelo .env montado. */
+const PRESERVE_ENV_KEYS = [
+  'DASHBOARD_HOST',
+  'DASHBOARD_PORT',
+  'CHROME_EXECUTABLE_PATH',
+  'NODE_ENV',
+  'DATABASE_URL',
+];
+
+/**
+ * Relê o .env com override (p/ STRATEGY, TARGET_URLS, etc.).
+ * Mantém chaves já definidas pelo Compose (ex.: DASHBOARD_HOST=0.0.0.0).
+ */
+function reloadEnv() {
+  const preserved = {};
+  for (const key of PRESERVE_ENV_KEYS) {
+    if (process.env[key] !== undefined && process.env[key] !== '') {
+      preserved[key] = process.env[key];
+    }
+  }
+  // Lê o arquivo de forma explícita — evita valor antigo preso em process.env
+  // quando o Compose injetou env_file e o .env no disco já mudou.
+  if (fs.existsSync(ENV_PATH)) {
+    const parsed = dotenv.parse(fs.readFileSync(ENV_PATH, 'utf8'));
+    Object.assign(process.env, parsed);
+  } else {
+    dotenv.config({ path: ENV_PATH, override: true });
+  }
+  Object.assign(process.env, preserved);
+}
 
 reloadEnv();
 
@@ -14,11 +47,6 @@ function bool(value, fallback) {
 
 function int(value, fallback) {
   const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function float(value, fallback) {
-  const n = Number.parseFloat(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
@@ -40,27 +68,24 @@ function loadConfig() {
 
   const userAgents = loadJson('user-agents.json');
   const referrers = loadJson('referrers.json');
-  const browserProfiles = loadJson('browser-profiles.json');
-
-  const proxyServers = [
-    ...parseProxyList(process.env.PROXY_SERVER),
-    ...parseProxyList(process.env.PROXY_SERVERS),
-  ].filter((v, i, arr) => arr.indexOf(v) === i);
-
-  const sessionDir = (process.env.SESSION_DIR || 'logs/browser-session').trim();
+  const deviceProfiles = loadJson('device-profiles.json');
 
   const config = {
-    strategy: (process.env.STRATEGY || 'directLink').trim(),
+    strategy: (process.env.STRATEGY || 'dryRun').trim(),
     headless: bool(process.env.HEADLESS, true),
     chromeExecutablePath: (process.env.CHROME_EXECUTABLE_PATH || '').trim() || null,
-    chromeAutodetect: bool(process.env.CHROME_AUTODETECT, true),
 
     navigationTimeoutMs: int(process.env.NAVIGATION_TIMEOUT_MS, 60_000),
     defaultTimeoutMs: int(process.env.DEFAULT_TIMEOUT_MS, 30_000),
 
-    intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 0),
-    intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 0),
-    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 0),
+    intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 60),
+    intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 900),
+    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 20),
+    concurrency: int(process.env.CONCURRENCY, 5),
+
+    // vazio = todos desktop via CONCURRENCY | ex.: desktop:2,mobile:3,tablet:1
+    deviceMix: (process.env.DEVICE_MIX || '').trim(),
+    deviceProfiles,
 
     viewport: {
       width: int(process.env.VIEWPORT_WIDTH, 1920),
@@ -68,38 +93,24 @@ function loadConfig() {
     },
 
     targetUrls: parseUrls(process.env.TARGET_URLS),
-    maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 0),
+    maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 15),
+    browsePagesMin: int(process.env.BROWSE_PAGES_MIN, 1),
+    browsePagesMax: int(process.env.BROWSE_PAGES_MAX, 3),
     includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
     clickSelector: (process.env.CLICK_SELECTOR || '').trim() || null,
 
     proxy: {
       enabled: bool(process.env.PROXY_ENABLED, false),
-      servers: proxyServers,
-    },
-
-    stealth: {
-      enabled: bool(process.env.STEALTH, true),
-      humanize: bool(process.env.HUMANIZE, true),
-      locale: (process.env.STEALTH_LOCALE || 'pt-BR').trim(),
-      timezone: (process.env.STEALTH_TIMEZONE || 'America/Sao_Paulo').trim(),
-      gapMinMs: int(process.env.STEALTH_GAP_MIN_MS, 4000),
-      gapMaxMs: int(process.env.STEALTH_GAP_MAX_MS, 22000),
-      dwellMinMs: int(process.env.DWELL_MIN_MS, 900),
-      dwellMaxMs: int(process.env.DWELL_MAX_MS, 4200),
-      geo: {
-        latitude: float(process.env.GEO_LAT, -23.5505),
-        longitude: float(process.env.GEO_LON, -46.6333),
-      },
-    },
-
-    session: {
-      persist: bool(process.env.SESSION_PERSIST, false),
-      dir: path.resolve(process.cwd(), sessionDir),
+      list: parseProxyList(process.env.PROXY_LIST || ''),
+      server: (process.env.PROXY_SERVER || '').trim() || null,
+      maxProxies: Math.min(int(process.env.PROXY_MAX, FREE_PLAN_MAX), FREE_PLAN_MAX),
+      rotate: (process.env.PROXY_ROTATE || 'roundRobin').trim(),
+      // true = recusa IPs marcados proxy/hosting (plano free Webshare quase todo falha)
+      skipFlagged: bool(process.env.PROXY_SKIP_FLAGGED, false),
     },
 
     userAgents,
     referrers,
-    browserProfiles,
 
     // Ofuscação — visita deve parecer humana (ver docs/11-ofuscacao.md)
     stealth: {
@@ -116,11 +127,8 @@ function loadConfig() {
   if (config.intervalMinSec > config.intervalMaxSec) {
     throw new Error('INTERVAL_MIN_SEC não pode ser maior que INTERVAL_MAX_SEC');
   }
-  if (config.stealth.gapMinMs > config.stealth.gapMaxMs) {
-    throw new Error('STEALTH_GAP_MIN_MS não pode ser maior que STEALTH_GAP_MAX_MS');
-  }
-  if (config.stealth.dwellMinMs > config.stealth.dwellMaxMs) {
-    throw new Error('DWELL_MIN_MS não pode ser maior que DWELL_MAX_MS');
+  if (config.browsePagesMin > config.browsePagesMax) {
+    throw new Error('BROWSE_PAGES_MIN não pode ser maior que BROWSE_PAGES_MAX');
   }
 
   return config;
