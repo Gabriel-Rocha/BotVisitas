@@ -1,0 +1,47 @@
+# Contexto enviado ao daemon Docker
+.git
+.cursor
+.claude
+_bmad
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+
+# Dependências e artefatos locais
+node_modules
+web/node_modules
+web/dist
+npm-debug.log*
+coverage
+.nyc_output
+dist
+build
+tmp
+temp
+
+# Secrets e runtime local
+.env
+.env.local
+.env.*.local
+logs
+*.log
+*.pem
+*.key
+credentials*.json
+config/local.*
+config/secrets.*
+
+# Docs / IDE (não entram na imagem)
+docs
+README.md
+*.md
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+
+# Caches de browser locais
+.local-chromium
+.puppeteer_cache

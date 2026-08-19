@@ -74,10 +74,22 @@
 ## Backlog (pós-v2)
 
 - [ ] Lint (eslint) + script `npm test` smoke
-- [ ] Docker opcional p/ servers
-- [ ] Rotação real de proxy (quando houver orçamento)
+- [x] Docker — forma padrão de execução (`Dockerfile` + `docker-compose.yml` + `docs/08-docker.md`)
+- [x] Proxy Webshare free (máx. 10) — lease exclusivo + workers (`docs/09-proxies-webshare.md`)
+- [x] Workers concorrentes (`CONCURRENCY`, default 5)
+- [x] Multi-agentes por device (`DEVICE_MIX` + `device-profiles.json`)
+- [x] Dashboard UI (Express + React) — `docs/10-dashboard.md`
+- [x] Aba de visualização ao vivo do viewport por worker
+- [x] Aba Indicadores (métricas ao vivo + agregados Postgres)
+- [x] Histórico Postgres (runs + logs + snapshots, volume Docker persistente)
+- [x] Ofuscação de visitas (stealth + humanize + doc crítica `11-ofuscacao.md` + cláusula pétrea #2)
+- [x] Timezone/locale automático pela região do IP (`src/core/geo.js` + `STEALTH_GEO_TZ`)
+- [x] Stealth sem quebrar JS do site (WebRTC suave; sem disable site-per-process)
+- [x] Aviso de reputação IP (`proxy`/`hosting`) + `PROXY_SKIP_FLAGGED` + doc "anonymous proxy detected"
+- [ ] Health-check de proxy (pular IP morto)
+- [ ] Rotação premium / residencial (quando houver orçamento)
 - [ ] Novas strategies sob demanda
-- [ ] Commit da refatoração (quando usuário pedir)
+- [ ] Commit (quando usuário pedir)
 
 ---
 
@@ -87,3 +99,5 @@
 - Implementar proxy “de verdade” sem pedido
 - Monólitos copy-paste
 - Pastas fora da arquitetura documentada
+- Expor automação / IP real (regressão de ofuscação) — ver `docs/11-ofuscacao.md`
+- UAs de outro motor (Firefox/Safari) no Chromium
