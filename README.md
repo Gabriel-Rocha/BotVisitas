@@ -21,7 +21,7 @@ npm install
 npm start
 ```
 
-Default: `STRATEGY=directLink` com stealth ligado (identidade persistente, headers, timing humano).
+Default: `STRATEGY=directLink` com stealth ligado. Cada visita é um **visitante novo** (contexto anônimo, cookies zerados, fingerprint coerente).
 
 Para só validar o pipeline, sem browser:
 
@@ -45,15 +45,17 @@ O browser é preparado para parecer uma sessão Chrome real:
 | Técnica | Onde |
 |---------|------|
 | User-Agent + headers / client hints | `src/core/stealth.js` + perfil |
-| Cookies + perfil Chrome persistente | `logs/browser-session/` |
+| Cookies isolados por visita | contexto anônimo (sem vazar sessão entre visitantes) |
 | Frequência irregular de requests | `STEALTH_GAP_*` / `INTERVAL_*` |
-| IP / WebRTC (não vazar IP real com proxy) | `PROXY_*` + flags WebRTC |
+| IP / WebRTC (não vazar IP real com proxy) | `PROXY_*` por visitante + flags WebRTC |
 | Navegação humana (mouse, scroll, dwell) | `src/core/human.js` |
 | JS (platform, WebGL, tela, hardware) | `evaluateOnNewDocument` |
 | Sinais de automação | puppeteer-extra-plugin-stealth + flags |
 | TLS/HTTP | Chrome real (`CHROME_AUTODETECT`) — JA3 segue o binário |
 
-Identidade (UA, viewport, timezone, proxy) **não rotaciona a cada visita**: a mesma sessão reutiliza cookies e fingerprint.
+Cada visita troca o **visitante inteiro** (fingerprint + cookies + proxy). O que não fazemos é misturar: UA novo com cookie velho, ou IP novo na mesma sessão.
+
+`SESSION_PERSIST=true` volta ao modo “um usuário só” (debug).
 
 Proxy residencial/móvel continua sendo o que mais pesa na reputação de IP. Sem proxy, o IP é o da máquina.
 
@@ -78,7 +80,7 @@ CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome
 
 ## Proxies
 
-`PROXY_ENABLED=true` e `PROXY_SERVER` / `PROXY_SERVERS` (lista). O endpoint escolhido fica preso à identidade da sessão.
+`PROXY_ENABLED=true` e `PROXY_SERVER` / `PROXY_SERVERS` (lista). Sem persistência, a lista entra em rodízio a cada visitante.
 Ver `src/core/proxy.js`.
 
 ## Documentação (contexto p/ IA e humanos)

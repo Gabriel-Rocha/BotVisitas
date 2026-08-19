@@ -11,7 +11,9 @@ puppeteer.use(StealthPlugin());
 async function launchBrowser(config, logger, identity) {
   assertProxyReady(config.proxy, logger);
 
-  const args = getLaunchArgs(config, identity);
+  const args = getLaunchArgs(config, identity, {
+    attachProxy: Boolean(config.session.persist),
+  });
   const executablePath = findChromeExecutable(config);
   const files = sessionPaths(config);
 

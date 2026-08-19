@@ -12,7 +12,7 @@ async function run(_page, { config, logger }) {
   logger.info('[dryRun] Pipeline OK — sem browser e sem direct links');
   logger.info(`[dryRun] Em produção visitaria: ${wouldVisit.join(', ')}`);
   logger.info(
-    `[dryRun] includeReferrer=${config.includeReferrer} | maxClicks=${config.maxClicksPerPage} | proxy=${config.proxy.enabled} | stealth=${config.stealth.enabled}`
+    `[dryRun] includeReferrer=${config.includeReferrer} | maxClicks=${config.maxClicksPerPage} | proxy=${config.proxy.enabled} | stealth=${config.stealth.enabled} | persist=${config.session.persist}`
   );
 
   return {

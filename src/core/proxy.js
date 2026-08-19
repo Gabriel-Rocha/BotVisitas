@@ -2,7 +2,8 @@
 
 /**
  * Proxy só via este módulo + env (não espalhar --proxy-server).
- * Lista em PROXY_SERVER / PROXY_SERVERS; a identidade fixa o IP da sessão.
+ * Em modo visitante (default): um endpoint por visita, via contexto anônimo.
+ * Com SESSION_PERSIST=true: um endpoint preso à identidade salva.
  */
 
 function parseProxyList(raw) {

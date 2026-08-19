@@ -90,7 +90,7 @@ function loadConfig() {
     },
 
     session: {
-      persist: bool(process.env.SESSION_PERSIST, true),
+      persist: bool(process.env.SESSION_PERSIST, false),
       dir: path.resolve(process.cwd(), sessionDir),
     },
 

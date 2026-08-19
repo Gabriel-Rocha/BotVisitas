@@ -1,18 +1,21 @@
 'use strict';
 
 const { launchBrowser, closeBrowser } = require('./browser');
-const { createSession, recreateSession } = require('./session');
+const { createSession, createVisitorContext, closePage, closeContext } = require('./session');
 const {
+  createBaseIdentity,
   loadOrCreateBaseIdentity,
   finalizeIdentity,
   saveIdentity,
   persistCookies,
+  nextVisitor,
 } = require('./identity');
 const { computeGapMs } = require('./stealth');
 const { sleep } = require('../utils/sleep');
 
 function createLoop({ config, strategy, logger }) {
   const needsBrowser = strategy.requiresBrowser !== false;
+  const rotate = !config.session.persist;
 
   const stats = {
     startedAt: Date.now(),
@@ -22,21 +25,62 @@ function createLoop({ config, strategy, logger }) {
   };
 
   let browser = null;
+  let context = null;
   let page = null;
   let identity = null;
+  let chromeVersion = null;
   let stopping = false;
+
+  async function teardownBrowser() {
+    await closePage(page);
+    page = null;
+    await closeContext(context);
+    context = null;
+    await closeBrowser(browser, logger);
+    browser = null;
+    chromeVersion = null;
+    identity = null;
+  }
 
   async function ensureBrowser() {
     if (!needsBrowser) return;
     if (browser && browser.isConnected()) return;
-    await closeBrowser(browser, logger);
-    identity = loadOrCreateBaseIdentity(config, logger);
-    browser = await launchBrowser(config, logger, identity);
-    const version = await browser.version();
-    identity = finalizeIdentity(identity, version);
-    saveIdentity(config, identity);
-    logger.debug(`Chrome reportado: ${version}`);
-    page = await createSession(browser, config, logger, identity);
+    await teardownBrowser();
+    const launchIdentity = createBaseIdentity(config);
+    browser = await launchBrowser(config, logger, launchIdentity);
+    chromeVersion = await browser.version();
+    logger.debug(`Chrome reportado: ${chromeVersion}`);
+  }
+
+  async function openVisit() {
+    await ensureBrowser();
+    if (!needsBrowser) return;
+
+    if (!rotate) {
+      if (page && !page.isClosed()) return;
+      identity = loadOrCreateBaseIdentity(config, logger);
+      identity = finalizeIdentity(identity, chromeVersion);
+      saveIdentity(config, identity);
+      page = await createSession(browser, config, logger, identity);
+      return;
+    }
+
+    identity = nextVisitor(config, chromeVersion, logger);
+    context = await createVisitorContext(browser, identity);
+    page = await createSession(context, config, logger, identity);
+  }
+
+  async function finishVisit() {
+    if (!needsBrowser) return;
+    if (!rotate) {
+      await persistCookies(page, config, logger);
+      return;
+    }
+    await closePage(page);
+    page = null;
+    await closeContext(context);
+    context = null;
+    identity = null;
   }
 
   async function maybeRestartBrowser() {
@@ -46,28 +90,29 @@ function createLoop({ config, strategy, logger }) {
     if (stats.iterations === 0 || stats.iterations % every !== 0) return;
 
     logger.info(`Restart periódico do browser (#${stats.iterations})`);
-    await persistCookies(page, config, logger);
-    await closeBrowser(browser, logger);
-    browser = null;
-    page = null;
-    await ensureBrowser();
+    await teardownBrowser();
   }
 
   async function tick() {
-    await ensureBrowser();
-
-    const result = await strategy.run(page, { config, logger, identity });
-    if (result?.ok) stats.ok += 1;
-    else stats.errors += 1;
-
-    stats.iterations += 1;
-    await persistCookies(page, config, logger);
+    await openVisit();
+    try {
+      const result = await strategy.run(page, { config, logger, identity });
+      if (result?.ok) stats.ok += 1;
+      else stats.errors += 1;
+    } catch (err) {
+      stats.errors += 1;
+      logger.error('Erro na iteração:', err.message);
+      logger.debug(err.stack);
+    } finally {
+      stats.iterations += 1;
+      await finishVisit();
+    }
     await maybeRestartBrowser();
   }
 
   async function run() {
     logger.info(
-      `Loop iniciado | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'} | stealth=${config.stealth.enabled}`
+      `Loop iniciado | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'} | stealth=${config.stealth.enabled} | visitantes=${rotate ? 'novos a cada visita' : 'sessão persistente'}`
     );
 
     while (!stopping) {
@@ -75,18 +120,9 @@ function createLoop({ config, strategy, logger }) {
         await tick();
       } catch (err) {
         stats.errors += 1;
-        logger.error('Erro na iteração:', err.message);
+        logger.error('Falha ao preparar visita:', err.message);
         logger.debug(err.stack);
-
-        if (needsBrowser) {
-          try {
-            page = await recreateSession(browser, page, config, logger, identity);
-          } catch {
-            await closeBrowser(browser, logger);
-            browser = null;
-            page = null;
-          }
-        }
+        await teardownBrowser();
       }
 
       if (stopping) break;
@@ -103,11 +139,9 @@ function createLoop({ config, strategy, logger }) {
     stopping = true;
     logger.info('Encerrando loop...', JSON.stringify(getStats()));
     if (needsBrowser) {
-      await persistCookies(page, config, logger);
-      await closeBrowser(browser, logger);
+      if (!rotate) await persistCookies(page, config, logger);
+      await teardownBrowser();
     }
-    browser = null;
-    page = null;
   }
 
   function getStats() {

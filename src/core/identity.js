@@ -42,9 +42,14 @@ function buildSecChUa(major) {
   return `"Not)A;Brand";v="99", "Google Chrome";v="${major}", "Chromium";v="${major}"`;
 }
 
+let proxyCursor = 0;
+
 function pickProxy(config) {
   if (!config.proxy.enabled || !config.proxy.servers.length) return null;
-  return parseProxyServer(pick(config.proxy.servers));
+  const list = config.proxy.servers;
+  const raw = list[proxyCursor % list.length];
+  proxyCursor += 1;
+  return parseProxyServer(raw);
 }
 
 function applyLocaleOverrides(profile, config) {
@@ -101,6 +106,13 @@ function finalizeIdentity(identity, browserVersion) {
   identity.userAgent = buildUserAgent(identity, chrome);
   identity.secChUa = buildSecChUa(chrome.major);
   identity.updatedAt = new Date().toISOString();
+  return identity;
+}
+
+function nextVisitor(config, browserVersion, logger) {
+  const identity = finalizeIdentity(createBaseIdentity(config), browserVersion);
+  const proxyLabel = identity.proxy ? identity.proxy.arg : 'direct';
+  logger.info(`Visitante novo | perfil=${identity.profileId} | proxy=${proxyLabel}`);
   return identity;
 }
 
@@ -181,6 +193,7 @@ module.exports = {
   finalizeIdentity,
   loadOrCreateBaseIdentity,
   saveIdentity,
+  nextVisitor,
   restoreCookies,
   persistCookies,
 };

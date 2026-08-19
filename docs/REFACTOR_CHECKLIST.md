@@ -12,14 +12,14 @@
 |---|----------|-------|
 | 1 | Escopo | Reescrita do zero; colaborativo + multi-dispositivo |
 | 2 | Direct Link | **default = directLink** |
-| 3 | Proxies | Lista via env; endpoint fixo por identidade de sessão |
+| 3 | Proxies | Lista via env; rodízio por visitante (default) |
 | 4 | JS | **CommonJS** |
 | 5 | Chromium | Chrome do sistema (autodetect) ou Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
 | 6 | Blog / GH Pages / fetch | Fora do v1 |
 | 7 | Headless | `HEADLESS=true` default; `start:headed` p/ debug |
 | 8 | Intervalo | `INTERVAL_*=0` usa `STEALTH_GAP_*` (padrão humano irregular) |
 | 9 | Restart do browser | Default 0 (nunca), configurável via env |
-| 10 | Stealth | Ligado por default; identidade + cookies persistentes |
+| 10 | Stealth | Ligado por default; visitante novo a cada visita |
 
 ---
 
@@ -72,7 +72,8 @@
 
 ### FASE 9 — Stealth / anti-detecção
 - [x] User-Agent + headers HTTP / client hints alinhados ao Chrome real
-- [x] Cookies + `userDataDir` persistentes
+- [x] Visitante novo a cada visita (contexto anônimo; `SESSION_PERSIST` é opt-in)
+- [x] Cookies isolados por visita (contexto anônimo; persistência é opt-in)
 - [x] Frequência irregular (`STEALTH_GAP_*`)
 - [x] Proxy + flags WebRTC (IP)
 - [x] Navegação humana (mouse, scroll, dwell)
@@ -87,7 +88,7 @@
 - [x] Script `npm test` smoke (stealth/config)
 - [ ] Lint (eslint)
 - [ ] Docker opcional p/ servers
-- [ ] Health-check / rotação automática de proxy
+- [ ] Health-check de proxy
 - [ ] Novas strategies sob demanda
 
 ---
@@ -95,7 +96,7 @@
 ## Anti-padrões
 
 - Hardcodar secrets/URLs
-- Rotacionar UA/IP/cookies a cada visita (quebra sessão)
+- Misturar UA/IP/cookies de visitantes diferentes na mesma sessão
 - Fingir Firefox/UA móvel no Chromium
 - Monólitos copy-paste
 - Pastas fora da arquitetura documentada

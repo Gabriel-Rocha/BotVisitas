@@ -5,11 +5,11 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
-process.env.SESSION_PERSIST = 'false';
 process.env.SESSION_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'botvisitas-session-'));
 process.env.STEALTH = 'true';
 process.env.HUMANIZE = 'true';
 process.env.PROXY_ENABLED = 'false';
+delete process.env.SESSION_PERSIST;
 
 const { loadConfig } = require('../src/config');
 const {
@@ -18,6 +18,7 @@ const {
   buildSecChUa,
   createBaseIdentity,
   finalizeIdentity,
+  nextVisitor,
 } = require('../src/core/identity');
 const {
   extraHttpHeaders,
@@ -30,6 +31,7 @@ const { clickPoint } = require('../src/core/human');
 
 const config = loadConfig();
 assert.strictEqual(config.strategy, 'directLink');
+assert.strictEqual(config.session.persist, false);
 assert.strictEqual(config.stealth.enabled, true);
 assert.strictEqual(config.stealth.humanize, true);
 assert.ok(config.browserProfiles.length >= 3);
@@ -70,6 +72,19 @@ assert.strictEqual(parsed.password, 'p@ss');
 assert.strictEqual(parsed.arg, 'http://10.0.0.2:8080');
 assert.deepStrictEqual(getProxyLaunchArgs(parsed), ['--proxy-server=http://10.0.0.2:8080']);
 assert.deepStrictEqual(parseProxyList('a:1, b:2\nc:3'), ['a:1', 'b:2', 'c:3']);
+
+const idWithProxy = { ...identity, proxy: parsed };
+const argsNoProxy = getLaunchArgs(config, idWithProxy, { attachProxy: false });
+assert.ok(!argsNoProxy.some((a) => a.startsWith('--proxy-server=')));
+const argsWithProxy = getLaunchArgs(config, idWithProxy, { attachProxy: true });
+assert.ok(argsWithProxy.includes('--proxy-server=http://10.0.0.2:8080'));
+
+const logs = [];
+const visitor = nextVisitor(config, 'Chrome/131.0.6778.108', {
+  info: (...args) => logs.push(args.join(' ')),
+});
+assert.ok(visitor.userAgent);
+assert.ok(logs.some((line) => line.includes('Visitante novo')));
 
 const gap = computeGapMs(config);
 assert.ok(gap >= config.stealth.gapMinMs);

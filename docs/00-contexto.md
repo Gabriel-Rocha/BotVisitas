@@ -11,8 +11,8 @@ Projeto pensado para **vários colaboradores** e execução em **vários disposi
 - puppeteer + puppeteer-extra + stealth
 - dotenv (config)
 - Sem DB / API / UI no v1
-- Proxies: lista via env; o endpoint fica preso à identidade da sessão
-- Stealth: identidade persistente, headers, timing humano, fingerprint JS, Chrome real para TLS
+- Proxies: lista via env; rodízio por visitante (ou preso à sessão se `SESSION_PERSIST=true`)
+- Stealth: visitante novo a cada visita, headers, timing humano, fingerprint JS, Chrome real para TLS
 
 ## Default
 

@@ -13,7 +13,7 @@ async function main() {
   logger.info('BotVisitas v2 — start');
   logger.info(`Node ${process.version} | platform=${process.platform} | arch=${process.arch}`);
   logger.info(
-    `strategy=${config.strategy} | headless=${config.headless} | proxy=${config.proxy.enabled} | stealth=${config.stealth.enabled} | humanize=${config.stealth.humanize}`
+    `strategy=${config.strategy} | headless=${config.headless} | proxy=${config.proxy.enabled} | stealth=${config.stealth.enabled} | humanize=${config.stealth.humanize} | persist=${config.session.persist}`
   );
 
   const loop = createLoop({ config, strategy, logger });

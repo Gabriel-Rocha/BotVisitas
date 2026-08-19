@@ -18,7 +18,7 @@ BotVisitas/
 │   │   ├── session.js
 │   │   ├── loop.js
 │   │   ├── proxy.js
-│   │   ├── identity.js     # perfil + cookies persistentes
+│   │   ├── identity.js     # visitante (fingerprint coerente)
 │   │   ├── stealth.js      # headers, JS, flags, TLS via Chrome
 │   │   └── human.js        # mouse/scroll/dwell
 │   ├── strategies/
@@ -43,15 +43,15 @@ BotVisitas/
 ```
 index → loadConfig → resolveStrategy → createLoop
                          ↓
-              identity (load or create)
+              browser.launch (Chrome + stealth flags)
                          ↓
-              browser.launch (Chrome + stealth flags + proxy)
+              a cada visita: visitante novo (contexto anônimo)
                          ↓
-              session (headers, CDP UA, cookies, JS fingerprint)
+              identity + proxy + fingerprint + cookies zerados
                          ↓
               strategy.run (navegação humana)
                          ↓
-              persist cookies → gap irregular → repeat
+              fecha contexto → gap irregular → repeat
 ```
 
 ## Contrato de strategy

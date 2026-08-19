@@ -43,10 +43,11 @@ function findChromeExecutable(config) {
   return candidates.find((p) => fs.existsSync(p)) || null;
 }
 
-function getLaunchArgs(config, identity) {
+function getLaunchArgs(config, identity, options = {}) {
   const w = identity.viewport.width;
   const h = identity.viewport.height;
   const locale = identity.locale || 'pt-BR';
+  const attachProxy = options.attachProxy === true;
 
   return [
     '--disable-dev-shm-usage',
@@ -70,8 +71,8 @@ function getLaunchArgs(config, identity) {
     `--window-size=${w},${h}`,
     `--window-position=${randomInt(0, 24)},${randomInt(0, 24)}`,
     `--lang=${locale}`,
-    ...getWebrtcLaunchArgs(Boolean(config.proxy.enabled && identity.proxy)),
-    ...getProxyLaunchArgs(identity.proxy),
+    ...getWebrtcLaunchArgs(Boolean(config.proxy.enabled)),
+    ...(attachProxy ? getProxyLaunchArgs(identity.proxy) : []),
   ];
 }
 

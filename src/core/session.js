@@ -4,8 +4,8 @@ const { authenticateProxy } = require('./proxy');
 const { restoreCookies } = require('./identity');
 const { applyFingerprint, applyCdpOverrides, extraHttpHeaders } = require('./stealth');
 
-async function createSession(browser, config, logger, identity) {
-  const page = await browser.newPage();
+async function createSession(source, config, logger, identity) {
+  const page = await source.newPage();
   const vp = identity?.viewport || config.viewport;
 
   await page.setViewport({
@@ -29,7 +29,9 @@ async function createSession(browser, config, logger, identity) {
     } else if (identity.userAgent) {
       await page.setUserAgent(identity.userAgent);
     }
-    await restoreCookies(page, config, logger);
+    if (config.session.persist) {
+      await restoreCookies(page, config, logger);
+    }
     logger.info(
       `Sessão | perfil=${identity.profileId} | UA Chrome/${identity.chromeMajor} | tz=${identity.timezone}`
     );
@@ -38,15 +40,30 @@ async function createSession(browser, config, logger, identity) {
   return page;
 }
 
-async function recreateSession(browser, page, config, logger, identity) {
-  if (page && !page.isClosed()) {
-    try {
-      await page.close();
-    } catch {
-      // ignore
-    }
+async function createVisitorContext(browser, identity) {
+  const options = {};
+  if (identity?.proxy) {
+    options.proxyServer = identity.proxy.arg;
   }
-  return createSession(browser, config, logger, identity);
+  return browser.createIncognitoBrowserContext(options);
 }
 
-module.exports = { createSession, recreateSession };
+async function closePage(page) {
+  if (!page || page.isClosed()) return;
+  try {
+    await page.close();
+  } catch {
+    // ignore
+  }
+}
+
+async function closeContext(context) {
+  if (!context) return;
+  try {
+    await context.close();
+  } catch {
+    // ignore
+  }
+}
+
+module.exports = { createSession, createVisitorContext, closePage, closeContext };
