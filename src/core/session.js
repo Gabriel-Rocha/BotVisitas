@@ -1,69 +1,115 @@
 'use strict';
 
-const { authenticateProxy } = require('./proxy');
-const { restoreCookies } = require('./identity');
-const { applyFingerprint, applyCdpOverrides, extraHttpHeaders } = require('./stealth');
+const { pick } = require('../utils/random');
+const { pickSessionPersona } = require('./devices');
+const { applyProxyAuth } = require('./proxy');
+const { resolveSessionLocale } = require('./geo');
+const {
+  applyPageStealth,
+  applyLocaleHints,
+  buildRealisticHeaders,
+} = require('./stealth');
 
-async function createSession(source, config, logger, identity) {
-  const page = await source.newPage();
-  const vp = identity?.viewport || config.viewport;
+async function createSession(
+  browser,
+  config,
+  logger,
+  activeProxy = null,
+  device = null,
+  preResolvedLocale = null
+) {
+  const page = await browser.newPage();
 
-  await page.setViewport({
-    width: vp.width,
-    height: vp.height,
-    deviceScaleFactor: vp.deviceScaleFactor || 1,
-    hasTouch: false,
-    isMobile: false,
-    isLandscape: vp.width >= vp.height,
+  if (activeProxy) {
+    await applyProxyAuth(page, activeProxy);
+  }
+
+  let viewport;
+  let userAgent;
+  let isMobile = false;
+
+  if (device?.profile) {
+    const persona = pickSessionPersona(device.profile);
+    viewport = persona.viewport;
+    userAgent = persona.userAgent;
+    isMobile = Boolean(persona.isMobile);
+  } else {
+    viewport = {
+      width: config.viewport.width,
+      height: config.viewport.height,
+      deviceScaleFactor: 1,
+      isMobile: false,
+      hasTouch: false,
+    };
+    userAgent = pick(config.userAgents);
+  }
+
+  const localeHints =
+    preResolvedLocale ||
+    (await resolveSessionLocale({
+      proxy: activeProxy,
+      fallbackTimezone: config.stealth?.timezoneId || 'America/Sao_Paulo',
+      fallbackLocale: config.stealth?.locale || 'pt-BR',
+      enabled: config.stealth?.geoTz !== false,
+      logger,
+    }));
+
+  // Ofuscação: patches + timezone alinhado ao IP antes de qualquer navegação.
+  await applyPageStealth(page, { languages: localeHints.languages });
+  await applyLocaleHints(page, {
+    timezoneId: localeHints.timezoneId,
+    locale: localeHints.locale,
   });
+
+  await page.setViewport(viewport);
   await page.setDefaultNavigationTimeout(config.navigationTimeoutMs);
   await page.setDefaultTimeout(config.defaultTimeoutMs);
-  await page.setCacheEnabled(true);
+  await page.setUserAgent(userAgent);
+  await page.setExtraHTTPHeaders(
+    buildRealisticHeaders(userAgent, {
+      isMobile,
+      acceptLanguage: localeHints.acceptLanguage,
+    })
+  );
 
-  if (identity) {
-    await authenticateProxy(page, identity.proxy);
-    if (config.stealth.enabled) {
-      await applyFingerprint(page, identity);
-      await applyCdpOverrides(page, identity);
-      await page.setExtraHTTPHeaders(extraHttpHeaders(identity));
-    } else if (identity.userAgent) {
-      await page.setUserAgent(identity.userAgent);
-    }
-    if (config.session.persist) {
-      await restoreCookies(page, config, logger);
-    }
-    logger.info(
-      `Sessão | perfil=${identity.profileId} | UA Chrome/${identity.chromeMajor} | tz=${identity.timezone}`
-    );
-  }
+  // Guarda na page para strategies / preview / debug.
+  page.__botViewport = {
+    width: viewport.width,
+    height: viewport.height,
+  };
+  page.__botDeviceType = device?.type || 'desktop';
+  page.__botTimezone = localeHints.timezoneId;
+  page.__botLocale = localeHints.locale;
+  page.__botGeo = {
+    countryCode: localeHints.countryCode,
+    ip: localeHints.ip,
+    source: localeHints.source,
+  };
+
+  logger.debug(
+    `device=${page.__botDeviceType} | tz=${localeHints.timezoneId} | locale=${localeHints.locale} | UA: ${userAgent}`
+  );
 
   return page;
 }
 
-async function createVisitorContext(browser, identity) {
-  const options = {};
-  if (identity?.proxy) {
-    options.proxyServer = identity.proxy.arg;
+async function recreateSession(
+  browser,
+  page,
+  config,
+  logger,
+  activeProxy = null,
+  device = null,
+  preResolvedLocale = null
+) {
+  if (page && !page.isClosed()) {
+    try {
+      await page.close();
+    } catch {
+      // ignore
+    }
   }
-  return browser.createIncognitoBrowserContext(options);
+  return createSession(browser, config, logger, activeProxy, device, preResolvedLocale);
 }
 
-async function closePage(page) {
-  if (!page || page.isClosed()) return;
-  try {
-    await page.close();
-  } catch {
-    // ignore
-  }
-}
-
-async function closeContext(context) {
-  if (!context) return;
-  try {
-    await context.close();
-  } catch {
-    // ignore
-  }
-}
-
-module.exports = { createSession, createVisitorContext, closePage, closeContext };
+module.exports = { createSession, recreateSession };
