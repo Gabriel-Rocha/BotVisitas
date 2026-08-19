@@ -2,7 +2,13 @@
 
 const { launchBrowser, closeBrowser } = require('./browser');
 const { createSession, recreateSession } = require('./session');
-const { randomInt } = require('../utils/random');
+const {
+  loadOrCreateBaseIdentity,
+  finalizeIdentity,
+  saveIdentity,
+  persistCookies,
+} = require('./identity');
+const { computeGapMs } = require('./stealth');
 const { sleep } = require('../utils/sleep');
 
 function createLoop({ config, strategy, logger }) {
@@ -17,14 +23,20 @@ function createLoop({ config, strategy, logger }) {
 
   let browser = null;
   let page = null;
+  let identity = null;
   let stopping = false;
 
   async function ensureBrowser() {
     if (!needsBrowser) return;
     if (browser && browser.isConnected()) return;
     await closeBrowser(browser, logger);
-    browser = await launchBrowser(config, logger);
-    page = await createSession(browser, config, logger);
+    identity = loadOrCreateBaseIdentity(config, logger);
+    browser = await launchBrowser(config, logger, identity);
+    const version = await browser.version();
+    identity = finalizeIdentity(identity, version);
+    saveIdentity(config, identity);
+    logger.debug(`Chrome reportado: ${version}`);
+    page = await createSession(browser, config, logger, identity);
   }
 
   async function maybeRestartBrowser() {
@@ -34,6 +46,7 @@ function createLoop({ config, strategy, logger }) {
     if (stats.iterations === 0 || stats.iterations % every !== 0) return;
 
     logger.info(`Restart periódico do browser (#${stats.iterations})`);
+    await persistCookies(page, config, logger);
     await closeBrowser(browser, logger);
     browser = null;
     page = null;
@@ -43,17 +56,18 @@ function createLoop({ config, strategy, logger }) {
   async function tick() {
     await ensureBrowser();
 
-    const result = await strategy.run(page, { config, logger });
+    const result = await strategy.run(page, { config, logger, identity });
     if (result?.ok) stats.ok += 1;
     else stats.errors += 1;
 
     stats.iterations += 1;
+    await persistCookies(page, config, logger);
     await maybeRestartBrowser();
   }
 
   async function run() {
     logger.info(
-      `Loop iniciado | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'}`
+      `Loop iniciado | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'} | stealth=${config.stealth.enabled}`
     );
 
     while (!stopping) {
@@ -66,7 +80,7 @@ function createLoop({ config, strategy, logger }) {
 
         if (needsBrowser) {
           try {
-            page = await recreateSession(browser, page, config, logger);
+            page = await recreateSession(browser, page, config, logger, identity);
           } catch {
             await closeBrowser(browser, logger);
             browser = null;
@@ -77,10 +91,10 @@ function createLoop({ config, strategy, logger }) {
 
       if (stopping) break;
 
-      const waitSec = randomInt(config.intervalMinSec, config.intervalMaxSec);
-      if (waitSec > 0) {
-        logger.info(`Aguardando ${waitSec}s até a próxima iteração...`);
-        await sleep(waitSec * 1000);
+      const waitMs = computeGapMs(config);
+      if (waitMs > 0) {
+        logger.info(`Aguardando ${(waitMs / 1000).toFixed(1)}s até a próxima iteração...`);
+        await sleep(waitMs);
       }
     }
   }
@@ -89,6 +103,7 @@ function createLoop({ config, strategy, logger }) {
     stopping = true;
     logger.info('Encerrando loop...', JSON.stringify(getStats()));
     if (needsBrowser) {
+      await persistCookies(page, config, logger);
       await closeBrowser(browser, logger);
     }
     browser = null;

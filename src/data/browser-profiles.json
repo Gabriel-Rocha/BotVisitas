@@ -1,0 +1,102 @@
+[
+  {
+    "id": "win11-1080p",
+    "platform": "Win32",
+    "uaPlatform": "Windows",
+    "platformVersion": "15.0.0",
+    "vendor": "Google Inc.",
+    "language": "pt-BR",
+    "languages": ["pt-BR", "pt", "en-US", "en"],
+    "locale": "pt-BR",
+    "timezone": "America/Sao_Paulo",
+    "viewport": { "width": 1920, "height": 1080, "deviceScaleFactor": 1 },
+    "screen": { "width": 1920, "height": 1080, "availWidth": 1920, "availHeight": 1040, "colorDepth": 24 },
+    "hardwareConcurrency": 8,
+    "deviceMemory": 8,
+    "maxTouchPoints": 0,
+    "webgl": {
+      "vendor": "Google Inc. (NVIDIA)",
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    }
+  },
+  {
+    "id": "win10-laptop",
+    "platform": "Win32",
+    "uaPlatform": "Windows",
+    "platformVersion": "10.0.0",
+    "vendor": "Google Inc.",
+    "language": "pt-BR",
+    "languages": ["pt-BR", "pt", "en-US", "en"],
+    "locale": "pt-BR",
+    "timezone": "America/Sao_Paulo",
+    "viewport": { "width": 1366, "height": 768, "deviceScaleFactor": 1 },
+    "screen": { "width": 1366, "height": 768, "availWidth": 1366, "availHeight": 728, "colorDepth": 24 },
+    "hardwareConcurrency": 4,
+    "deviceMemory": 8,
+    "maxTouchPoints": 0,
+    "webgl": {
+      "vendor": "Google Inc. (Intel)",
+      "renderer": "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    }
+  },
+  {
+    "id": "win11-qhd",
+    "platform": "Win32",
+    "uaPlatform": "Windows",
+    "platformVersion": "15.0.0",
+    "vendor": "Google Inc.",
+    "language": "pt-BR",
+    "languages": ["pt-BR", "pt", "en-US", "en"],
+    "locale": "pt-BR",
+    "timezone": "America/Sao_Paulo",
+    "viewport": { "width": 2560, "height": 1440, "deviceScaleFactor": 1 },
+    "screen": { "width": 2560, "height": 1440, "availWidth": 2560, "availHeight": 1400, "colorDepth": 24 },
+    "hardwareConcurrency": 12,
+    "deviceMemory": 16,
+    "maxTouchPoints": 0,
+    "webgl": {
+      "vendor": "Google Inc. (NVIDIA)",
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    }
+  },
+  {
+    "id": "mac-retina",
+    "platform": "MacIntel",
+    "uaPlatform": "macOS",
+    "platformVersion": "14.5.0",
+    "vendor": "Google Inc.",
+    "language": "pt-BR",
+    "languages": ["pt-BR", "pt", "en-US", "en"],
+    "locale": "pt-BR",
+    "timezone": "America/Sao_Paulo",
+    "viewport": { "width": 1440, "height": 900, "deviceScaleFactor": 2 },
+    "screen": { "width": 1440, "height": 900, "availWidth": 1440, "availHeight": 875, "colorDepth": 30 },
+    "hardwareConcurrency": 8,
+    "deviceMemory": 8,
+    "maxTouchPoints": 0,
+    "webgl": {
+      "vendor": "Google Inc. (Apple)",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)"
+    }
+  },
+  {
+    "id": "linux-1080p",
+    "platform": "Linux x86_64",
+    "uaPlatform": "Linux",
+    "platformVersion": "6.8.0",
+    "vendor": "Google Inc.",
+    "language": "pt-BR",
+    "languages": ["pt-BR", "pt", "en-US", "en"],
+    "locale": "pt-BR",
+    "timezone": "America/Sao_Paulo",
+    "viewport": { "width": 1920, "height": 1080, "deviceScaleFactor": 1 },
+    "screen": { "width": 1920, "height": 1080, "availWidth": 1920, "availHeight": 1048, "colorDepth": 24 },
+    "hardwareConcurrency": 8,
+    "deviceMemory": 8,
+    "maxTouchPoints": 0,
+    "webgl": {
+      "vendor": "Google Inc. (NVIDIA)",
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 OpenGL 4.5.0)"
+    }
+  }
+]

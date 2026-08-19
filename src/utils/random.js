@@ -1,9 +1,13 @@
 'use strict';
 
 function randomInt(min, max) {
-  const lo = Math.ceil(min);
-  const hi = Math.floor(max);
+  const lo = Math.ceil(Math.min(min, max));
+  const hi = Math.floor(Math.max(min, max));
   return Math.floor(Math.random() * (hi - lo + 1)) + lo;
+}
+
+function randomFloat(min, max) {
+  return Math.random() * (max - min) + min;
 }
 
 function pick(list) {
@@ -13,4 +17,8 @@ function pick(list) {
   return list[randomInt(0, list.length - 1)];
 }
 
-module.exports = { randomInt, pick };
+function chance(probability) {
+  return Math.random() < probability;
+}
+
+module.exports = { randomInt, randomFloat, pick, chance };

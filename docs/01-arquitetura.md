@@ -6,9 +6,10 @@
 BotVisitas/
 ├── docs/
 ├── config/                 # overrides locais (opcional)
-├── logs/                   # gitignored
+├── logs/                   # gitignored (inclui sessão Chrome)
 ├── scripts/
-│   └── start.sh
+│   ├── start.sh
+│   └── smoke-stealth.js
 ├── src/
 │   ├── index.js            # entrypoint
 │   ├── config/index.js
@@ -16,12 +17,16 @@ BotVisitas/
 │   │   ├── browser.js
 │   │   ├── session.js
 │   │   ├── loop.js
-│   │   └── proxy.js
+│   │   ├── proxy.js
+│   │   ├── identity.js     # perfil + cookies persistentes
+│   │   ├── stealth.js      # headers, JS, flags, TLS via Chrome
+│   │   └── human.js        # mouse/scroll/dwell
 │   ├── strategies/
-│   │   ├── index.js        # registry
+│   │   ├── index.js
 │   │   ├── directLink.js   # DEFAULT
-│   │   └── dryRun.js       # opt-in
+│   │   └── dryRun.js
 │   ├── data/
+│   │   ├── browser-profiles.json
 │   │   ├── user-agents.json
 │   │   └── referrers.json
 │   └── utils/
@@ -38,11 +43,15 @@ BotVisitas/
 ```
 index → loadConfig → resolveStrategy → createLoop
                          ↓
-              browser.launch (proxy se enabled)
+              identity (load or create)
                          ↓
-              session → strategy.run(page, ctx)
+              browser.launch (Chrome + stealth flags + proxy)
                          ↓
-              sleep (se INTERVAL > 0) → restart browser se necessário → repeat
+              session (headers, CDP UA, cookies, JS fingerprint)
+                         ↓
+              strategy.run (navegação humana)
+                         ↓
+              persist cookies → gap irregular → repeat
 ```
 
 ## Contrato de strategy
@@ -50,8 +59,8 @@ index → loadConfig → resolveStrategy → createLoop
 ```js
 module.exports = {
   name: 'directLink',
-  requiresBrowser: true, // false = loop não lança Chromium
-  async run(page, { config, logger }) {
+  requiresBrowser: true,
+  async run(page, { config, logger, identity }) {
     return { ok: true, meta: {} };
   },
 };
@@ -61,5 +70,5 @@ module.exports = {
 
 - Config só via env (sem paths absolutos de um SO)
 - Browser só se `requiresBrowser: true`
-- `CHROME_EXECUTABLE_PATH` opcional
+- `CHROME_EXECUTABLE_PATH` opcional; autodetect ligado por default
 - `npm start` em qualquer OS com Node >= 18

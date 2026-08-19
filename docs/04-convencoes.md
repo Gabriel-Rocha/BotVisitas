@@ -12,11 +12,15 @@
 - Secrets só em `.env`
 - Listas grandes em `src/data/*.json`
 - Default: `STRATEGY=directLink`
+- Stealth ligado; identidade persistente (não trocar UA a cada request)
+
 
 ## Proxies
 
 - Só via `src/core/proxy.js` + env
 - Não espalhar `--proxy-server` em outros arquivos
+- Endpoint de proxy fica preso à identidade da sessão
+
 
 ## Multi-device / colaboradores
 

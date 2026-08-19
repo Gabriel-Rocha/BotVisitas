@@ -8,7 +8,8 @@
     "start:dry": "node -e \"process.env.STRATEGY='dryRun';require('./src/index.js')\"",
     "start:headed": "node -e \"process.env.HEADLESS='false';require('./src/index.js')\"",
     "browsers:install": "npx puppeteer browsers install chrome",
-    "postinstall": "npx puppeteer browsers install chrome || true"
+    "postinstall": "npx puppeteer browsers install chrome || true",
+    "test": "node scripts/smoke-stealth.js"
   },
   "engines": {
     "node": ">=18"

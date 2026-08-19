@@ -1,22 +1,44 @@
 'use strict';
 
-const { pick } = require('../utils/random');
+const { authenticateProxy } = require('./proxy');
+const { restoreCookies } = require('./identity');
+const { applyFingerprint, applyCdpOverrides, extraHttpHeaders } = require('./stealth');
 
-async function createSession(browser, config, logger) {
+async function createSession(browser, config, logger, identity) {
   const page = await browser.newPage();
+  const vp = identity?.viewport || config.viewport;
 
-  await page.setViewport(config.viewport);
+  await page.setViewport({
+    width: vp.width,
+    height: vp.height,
+    deviceScaleFactor: vp.deviceScaleFactor || 1,
+    hasTouch: false,
+    isMobile: false,
+    isLandscape: vp.width >= vp.height,
+  });
   await page.setDefaultNavigationTimeout(config.navigationTimeoutMs);
   await page.setDefaultTimeout(config.defaultTimeoutMs);
+  await page.setCacheEnabled(true);
 
-  const userAgent = pick(config.userAgents);
-  await page.setUserAgent(userAgent);
-  logger.debug('UA:', userAgent);
+  if (identity) {
+    await authenticateProxy(page, identity.proxy);
+    if (config.stealth.enabled) {
+      await applyFingerprint(page, identity);
+      await applyCdpOverrides(page, identity);
+      await page.setExtraHTTPHeaders(extraHttpHeaders(identity));
+    } else if (identity.userAgent) {
+      await page.setUserAgent(identity.userAgent);
+    }
+    await restoreCookies(page, config, logger);
+    logger.info(
+      `Sessão | perfil=${identity.profileId} | UA Chrome/${identity.chromeMajor} | tz=${identity.timezone}`
+    );
+  }
 
   return page;
 }
 
-async function recreateSession(browser, page, config, logger) {
+async function recreateSession(browser, page, config, logger, identity) {
   if (page && !page.isClosed()) {
     try {
       await page.close();
@@ -24,7 +46,7 @@ async function recreateSession(browser, page, config, logger) {
       // ignore
     }
   }
-  return createSession(browser, config, logger);
+  return createSession(browser, config, logger, identity);
 }
 
 module.exports = { createSession, recreateSession };

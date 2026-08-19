@@ -8,8 +8,9 @@ Base reescrita do zero para colaboração e execução em vários ambientes.
 - Node.js **>= 18**
 - npm
 - **Browser é necessário** na strategy padrão (`directLink`)
-  - Chromium do Puppeteer (`npm run browsers:install`) **ou** `CHROME_EXECUTABLE_PATH`
-  - `dryRun` é opt-in e roda sem Chromium (só para validar pipeline)
+  - **Chrome do sistema** (melhor fingerprint TLS/HTTP) via autodetect ou `CHROME_EXECUTABLE_PATH`
+  - fallback: Chromium do Puppeteer (`npm run browsers:install`)
+  - `dryRun` é opt-in e roda sem Chromium
 
 ## Setup rápido
 
@@ -20,7 +21,7 @@ npm install
 npm start
 ```
 
-Default: `STRATEGY=directLink` — visita as URLs de `TARGET_URLS` em loop, sem espera entre iterações.
+Default: `STRATEGY=directLink` com stealth ligado (identidade persistente, headers, timing humano).
 
 Para só validar o pipeline, sem browser:
 
@@ -35,6 +36,26 @@ npm run start:dry
 | `npm start` | Sobe com a strategy do `.env` (`directLink` por padrão) |
 | `npm run start:dry` | Força dryRun (sem browser) |
 | `npm run start:headed` | Abre janela do browser (debug) |
+| `npm test` | Smoke das funções de stealth/config |
+
+## Stealth
+
+O browser é preparado para parecer uma sessão Chrome real:
+
+| Técnica | Onde |
+|---------|------|
+| User-Agent + headers / client hints | `src/core/stealth.js` + perfil |
+| Cookies + perfil Chrome persistente | `logs/browser-session/` |
+| Frequência irregular de requests | `STEALTH_GAP_*` / `INTERVAL_*` |
+| IP / WebRTC (não vazar IP real com proxy) | `PROXY_*` + flags WebRTC |
+| Navegação humana (mouse, scroll, dwell) | `src/core/human.js` |
+| JS (platform, WebGL, tela, hardware) | `evaluateOnNewDocument` |
+| Sinais de automação | puppeteer-extra-plugin-stealth + flags |
+| TLS/HTTP | Chrome real (`CHROME_AUTODETECT`) — JA3 segue o binário |
+
+Identidade (UA, viewport, timezone, proxy) **não rotaciona a cada visita**: a mesma sessão reutiliza cookies e fingerprint.
+
+Proxy residencial/móvel continua sendo o que mais pesa na reputação de IP. Sem proxy, o IP é o da máquina.
 
 ## Multi-dispositivo
 
@@ -42,22 +63,22 @@ npm run start:dry
 2. `cp .env.example .env` e ajuste (`TARGET_URLS` obrigatório em `directLink`)
 3. `npm install && npm start`
 
-Opcional — usar browser do sistema:
+Opcional — forçar browser do sistema:
 
 ```env
-CHROME_EXECUTABLE_PATH=/usr/bin/chromium
+CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome
 ```
 
 ## Estratégias
 
 | Nome | Status |
 |------|--------|
-| `directLink` | **Default** — acessa `TARGET_URLS` e clica |
+| `directLink` | **Default** — acessa `TARGET_URLS` com stealth |
 | `dryRun` | Opt-in — valida pipeline sem smartlinks |
 
 ## Proxies
 
-Configuráveis via `PROXY_ENABLED` / `PROXY_SERVER`.
+`PROXY_ENABLED=true` e `PROXY_SERVER` / `PROXY_SERVERS` (lista). O endpoint escolhido fica preso à identidade da sessão.
 Ver `src/core/proxy.js`.
 
 ## Documentação (contexto p/ IA e humanos)
@@ -70,9 +91,9 @@ Comece por [`docs/REFACTOR_CHECKLIST.md`](docs/REFACTOR_CHECKLIST.md).
 src/
   index.js          # entrypoint
   config/           # env → config
-  core/             # browser, session, loop, proxy
+  core/             # browser, session, loop, proxy, identity, stealth, human
   strategies/       # dryRun, directLink
-  data/             # UAs, referrers
+  data/             # perfis, UAs, referrers
   utils/            # logger, random, sleep
 ```
 
