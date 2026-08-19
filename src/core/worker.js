@@ -64,8 +64,8 @@ function createWorker({
   }
 
   /**
-   * Adquire proxy; se PROXY_SKIP_FLAGGED, descarta IPs proxy/hosting e tenta outro.
-   * Plano free Webshare quase sempre é flagged — skip só faz sentido com residencial.
+   * Adquire proxy; PROXY_SKIP_FLAGGED (default true) descarta IPs proxy/hosting.
+   * Datacenter/anon dispara "anonymous proxy detected" no alvo.
    */
   async function acquireUsableProxy() {
     if (!proxyLease) return null;

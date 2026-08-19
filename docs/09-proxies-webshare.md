@@ -7,25 +7,24 @@ O plano free oferece **10 proxies** — o código impõe `PROXY_MAX` ≤ 10.
 
 ## ⚠️ "Anonymous proxy detected"
 
-Mensagem vinda do **site alvo** (ads/smartlink/anti-fraude), não bug do BotVisitas.
+Mensagem vinda do **site alvo** (ads/smartlink/anti-fraude).
 
-Causa: o IP do proxy está em blocklist como **proxy anônimo / datacenter / hosting**.
-Planos free (Webshare etc.) usam quase sempre esse tipo de IP. O stealth de browser
-(UA, WebRTC, timezone) **não resolve** reputação de IP.
+Causa: o **IP de saída** está em blocklist como proxy anônimo / datacenter / hosting.
+Stealth de browser (UA, WebRTC, timezone) **não apaga** reputação de IP.
 
-Checagem rápida (exemplo): ip-api marca `proxy:true` / `hosting:true` nesses IPs.
+O bot agora **probeia o egress pelo próprio proxy** e **não envia visita** por IP flagged.
+
+```env
+# Default: recusar IPs proxy/hosting; se o pool inteiro for ruim, ir direto.
+PROXY_SKIP_FLAGGED=true
+PROXY_FALLBACK_DIRECT=true
+```
 
 | Opção | Efeito |
 |-------|--------|
-| Proxy **residencial** ou **mobile** | Mitigação real — IP de ISP doméstico/carrier |
-| `PROXY_ENABLED=false` + rede doméstica | 1 IP limpo; `CONCURRENCY` força 1 sem proxy |
-| Continuar no free/datacenter | Esperar bloqueio em redes de ads |
-
-```env
-# Aviso no log quando o IP está flagged (sempre).
-# true = recusar IPs proxy/hosting (só faz sentido com pool residencial):
-PROXY_SKIP_FLAGGED=false
-```
+| Proxy **residencial** ou **mobile** | Mitigação real — IP de ISP/carrier |
+| Pool só datacenter/free | IPs descartados; `PROXY_FALLBACK_DIRECT=true` cai na rede da máquina |
+| `PROXY_SKIP_FLAGGED=false` | Volta a mandar datacenter (o alvo volta a mostrar a mensagem) |
 
 No log do worker: `IP marcado como proxy/VPN/anon + hosting/datacenter...`.
 

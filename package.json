@@ -17,7 +17,7 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f bot",
     "docker:restart": "docker compose restart bot",
-    "test": "node -e \"require('./src/config').loadConfig(); console.log('config ok')\""
+    "test": "node -e \"const c=require('./src/config').loadConfig(); const g=require('./src/core/geo'); if(!c.proxy.skipFlagged||!c.proxy.fallbackDirect) process.exit(2); if(!g.isFlaggedAnonymousIp({isProxy:true})) process.exit(3); console.log('config ok');\""
   },
   "engines": {
     "node": ">=18"

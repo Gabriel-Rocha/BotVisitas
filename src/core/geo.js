@@ -110,9 +110,86 @@ function httpGetJson(url, timeoutMs = LOOKUP_TIMEOUT_MS) {
   });
 }
 
-/**
- * @param {string} [ipOrHost] — vazio = IP do egress atual (sem proxy na chamada)
- */
+function httpGetJsonViaHttpProxy(proxy, absoluteUrl, timeoutMs = LOOKUP_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(absoluteUrl);
+    const headers = {
+      Host: target.host,
+      Connection: 'close',
+    };
+    if (proxy.username) {
+      const token = Buffer.from(`${proxy.username}:${proxy.password || ''}`).toString('base64');
+      headers['Proxy-Authorization'] = `Basic ${token}`;
+    }
+
+    const req = http.request(
+      {
+        host: proxy.host,
+        port: Number(proxy.port) || 80,
+        method: 'GET',
+        path: absoluteUrl,
+        headers,
+        timeout: timeoutMs,
+      },
+      (res) => {
+        if (res.statusCode === 407) {
+          res.resume();
+          reject(new Error('Proxy exige autenticação (407)'));
+          return;
+        }
+        if (res.statusCode && res.statusCode >= 400) {
+          res.resume();
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          body += chunk;
+          if (body.length > 64_000) {
+            req.destroy();
+            reject(new Error('Resposta geo muito grande'));
+          }
+        });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Timeout no probe via proxy'));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function geoFromApiRaw(raw, fallbackIp) {
+  if (!raw || raw.status !== 'success') {
+    throw new Error(raw?.message || 'geo lookup falhou');
+  }
+  const countryCode = String(raw.countryCode || '').toUpperCase();
+  const hint = COUNTRY_HINTS[countryCode] || null;
+  return {
+    ip: raw.query || fallbackIp || null,
+    country: raw.country || null,
+    countryCode: countryCode || null,
+    timezoneId: raw.timezone || hint?.timezoneId || null,
+    locale: hint?.locale || null,
+    isp: raw.isp || null,
+    org: raw.org || null,
+    as: raw.as || null,
+    isProxy: Boolean(raw.proxy),
+    isHosting: Boolean(raw.hosting),
+    source: 'ip-api',
+  };
+}
+
 async function lookupGeo(ipOrHost) {
   const key = (ipOrHost && String(ipOrHost).trim()) || '__egress__';
   const cached = cache.get(key);
@@ -127,29 +204,38 @@ async function lookupGeo(ipOrHost) {
     : `http://ip-api.com/json/?fields=${fields}`;
 
   const raw = await httpGetJson(path);
-  if (!raw || raw.status !== 'success') {
-    throw new Error(raw?.message || 'geo lookup falhou');
-  }
-
-  const countryCode = String(raw.countryCode || '').toUpperCase();
-  const hint = COUNTRY_HINTS[countryCode] || null;
-  const data = {
-    ip: raw.query || ipOrHost || null,
-    country: raw.country || null,
-    countryCode: countryCode || null,
-    timezoneId: raw.timezone || hint?.timezoneId || null,
-    locale: hint?.locale || null,
-    isp: raw.isp || null,
-    org: raw.org || null,
-    as: raw.as || null,
-    // true = IP em blocklist de proxy/VPN/anon (causa clássica de "anonymous proxy detected")
-    isProxy: Boolean(raw.proxy),
-    isHosting: Boolean(raw.hosting),
-    source: 'ip-api',
-  };
-
+  const data = geoFromApiRaw(raw, ipOrHost);
   cache.set(key, { at: Date.now(), data });
   return data;
+}
+
+/**
+ * Reputação do IP de SAÍDA visto pela internet (pedido sai pelo proxy).
+ * lookupGeo(proxy.host) só olha o gateway — o egress pode ser outro IP.
+ */
+async function lookupGeoViaProxy(proxy) {
+  if (!proxy?.host) return lookupGeo(null);
+  const key = `via:${proxy.label || `${proxy.host}:${proxy.port}`}`;
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  const fields =
+    'status,message,country,countryCode,timezone,query,isp,org,as,proxy,hosting';
+  const url = `http://ip-api.com/json/?fields=${fields}`;
+
+  try {
+    const raw = await httpGetJsonViaHttpProxy(proxy, url);
+    const data = geoFromApiRaw(raw, proxy.host);
+    data.source = 'ip-api-via-proxy';
+    cache.set(key, { at: Date.now(), data });
+    return data;
+  } catch (err) {
+    const fallback = await lookupGeo(proxy.host);
+    fallback.source = `ip-api-host (${err.message})`;
+    return fallback;
+  }
 }
 
 /**
@@ -186,7 +272,7 @@ async function resolveSessionLocale({
     // Mesmo com STEALTH_GEO_TZ=false, consulta reputação do IP do proxy (aviso / skip).
     if (proxy?.host) {
       try {
-        const geo = await lookupGeo(proxy.host);
+        const geo = await lookupGeoViaProxy(proxy);
         if (logger && (geo.isProxy || geo.isHosting)) {
           logger.warn(
             `IP marcado como ${[
@@ -218,7 +304,7 @@ async function resolveSessionLocale({
 
   try {
     const target = proxy?.host || null;
-    const geo = await lookupGeo(target);
+    const geo = proxy ? await lookupGeoViaProxy(proxy) : await lookupGeo(target);
 
     const timezoneId = geo.timezoneId || fallbackTimezone;
     let locale = geo.locale || fallbackLocale;
@@ -289,6 +375,7 @@ module.exports = {
   languagesForLocale,
   acceptLanguageHeader,
   lookupGeo,
+  lookupGeoViaProxy,
   resolveSessionLocale,
   isFlaggedAnonymousIp,
   clearGeoCache,
