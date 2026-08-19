@@ -7,39 +7,39 @@ Base reescrita do zero para colaboração e execução em vários ambientes.
 
 - Node.js **>= 18**
 - npm
-- **Browser só é necessário** se a strategy exigir (ex.: `directLink`)
-  - Default `dryRun` roda **sem** Chromium (ótimo p/ validar em qualquer device)
-  - Com browser: Chromium do Puppeteer (`npm run browsers:install`) **ou** `CHROME_EXECUTABLE_PATH`
+- **Browser é necessário** na strategy padrão (`directLink`)
+  - Chromium do Puppeteer (`npm run browsers:install`) **ou** `CHROME_EXECUTABLE_PATH`
+  - `dryRun` é opt-in e roda sem Chromium (só para validar pipeline)
 
 ## Setup rápido
 
 ```bash
 cp .env.example .env
+# preencha TARGET_URLS no .env
 npm install
 npm start
 ```
 
-Default: `STRATEGY=dryRun` — sem browser e sem direct links (proposital).
+Default: `STRATEGY=directLink` — visita as URLs de `TARGET_URLS` em loop, sem espera entre iterações.
 
-Para usar `directLink` depois:
+Para só validar o pipeline, sem browser:
 
 ```bash
-npm run browsers:install   # se não usar Chrome do sistema
-# no .env: STRATEGY=directLink e TARGET_URLS=...
+npm run start:dry
 ```
 
 ## Scripts
 
 | Comando | O que faz |
 |---------|-----------|
-| `npm start` | Sobe com a strategy do `.env` |
-| `npm run start:dry` | Força dryRun |
+| `npm start` | Sobe com a strategy do `.env` (`directLink` por padrão) |
+| `npm run start:dry` | Força dryRun (sem browser) |
 | `npm run start:headed` | Abre janela do browser (debug) |
 
 ## Multi-dispositivo
 
 1. Clone o repo
-2. `cp .env.example .env` e ajuste
+2. `cp .env.example .env` e ajuste (`TARGET_URLS` obrigatório em `directLink`)
 3. `npm install && npm start`
 
 Opcional — usar browser do sistema:
@@ -52,12 +52,12 @@ CHROME_EXECUTABLE_PATH=/usr/bin/chromium
 
 | Nome | Status |
 |------|--------|
-| `dryRun` | **Default** — valida pipeline sem smartlinks |
-| `directLink` | Implementado; desligado por default (links fora de uso de propósito) |
+| `directLink` | **Default** — acessa `TARGET_URLS` e clica |
+| `dryRun` | Opt-in — valida pipeline sem smartlinks |
 
 ## Proxies
 
-Preparados na config (`PROXY_ENABLED` / `PROXY_SERVER`), **desligados** por custo.
+Configuráveis via `PROXY_ENABLED` / `PROXY_SERVER`.
 Ver `src/core/proxy.js`.
 
 ## Documentação (contexto p/ IA e humanos)
@@ -70,7 +70,7 @@ Comece por [`docs/REFACTOR_CHECKLIST.md`](docs/REFACTOR_CHECKLIST.md).
 src/
   index.js          # entrypoint
   config/           # env → config
-  core/             # browser, session, loop, proxy stub
+  core/             # browser, session, loop, proxy
   strategies/       # dryRun, directLink
   data/             # UAs, referrers
   utils/            # logger, random, sleep

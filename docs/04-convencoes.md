@@ -11,7 +11,7 @@
 
 - Secrets só em `.env`
 - Listas grandes em `src/data/*.json`
-- Default seguro: `STRATEGY=dryRun`
+- Default: `STRATEGY=directLink`
 
 ## Proxies
 

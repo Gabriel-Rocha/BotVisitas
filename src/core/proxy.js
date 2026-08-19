@@ -1,13 +1,8 @@
 'use strict';
 
 /**
- * Stub de proxy — pronto para evoluir sem espalhar ifs no browser.
- * Hoje: só devolve args do Chromium se PROXY_ENABLED=true e PROXY_SERVER estiver setado.
- *
- * Evolução futura (quando houver orçamento):
- * - carregar lista de proxies
- * - rotação / health-check
- * - auth user:pass
+ * Proxy via env: PROXY_ENABLED + PROXY_SERVER.
+ * Devolve args do Chromium quando habilitado.
  */
 
 function getProxyLaunchArgs(proxyConfig) {
@@ -20,10 +15,10 @@ function getProxyLaunchArgs(proxyConfig) {
 
 function assertProxyReady(proxyConfig, logger) {
   if (!proxyConfig?.enabled) {
-    logger.debug('Proxy desabilitado (esperado no v1).');
+    logger.debug('Proxy desabilitado.');
     return;
   }
-  logger.warn('Proxy habilitado — recurso experimental / preparar custo.');
+  logger.info(`Proxy habilitado: ${proxyConfig.server}`);
   if (!proxyConfig.server) {
     throw new Error('PROXY_SERVER obrigatório quando PROXY_ENABLED=true');
   }

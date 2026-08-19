@@ -2,11 +2,6 @@
 
 const { pick, randomInt } = require('../utils/random');
 
-/**
- * Direct link — implementado, mas NÃO é o default.
- * Ative só com STRATEGY=directLink e TARGET_URLS no .env.
- * Hoje os links estão propositalmente fora de uso.
- */
 async function run(page, { config, logger }) {
   if (!config.targetUrls.length) {
     throw new Error('STRATEGY=directLink exige TARGET_URLS no .env');
@@ -24,7 +19,8 @@ async function run(page, { config, logger }) {
 
   const x = config.viewport.width / 2;
   const y = config.viewport.height / 2;
-  const clicks = randomInt(1, config.maxClicksPerPage);
+  const maxClicks = config.maxClicksPerPage;
+  const clicks = maxClicks <= 0 ? 1 : randomInt(1, maxClicks);
 
   logger.info(`Cliques no centro (${x},${y}): ${clicks}`);
   for (let i = 0; i < clicks; i += 1) {

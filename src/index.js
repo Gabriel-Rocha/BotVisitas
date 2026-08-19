@@ -14,10 +14,6 @@ async function main() {
   logger.info(`Node ${process.version} | platform=${process.platform} | arch=${process.arch}`);
   logger.info(`strategy=${config.strategy} | headless=${config.headless} | proxy=${config.proxy.enabled}`);
 
-  if (config.strategy === 'directLink') {
-    logger.warn('Direct Link ativo — links podem estar propositalmente inativos.');
-  }
-
   const loop = createLoop({ config, strategy, logger });
 
   const shutdown = async (signal) => {

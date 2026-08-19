@@ -78,8 +78,10 @@ function createLoop({ config, strategy, logger }) {
       if (stopping) break;
 
       const waitSec = randomInt(config.intervalMinSec, config.intervalMaxSec);
-      logger.info(`Aguardando ${waitSec}s até a próxima iteração...`);
-      await sleep(waitSec * 1000);
+      if (waitSec > 0) {
+        logger.info(`Aguardando ${waitSec}s até a próxima iteração...`);
+        await sleep(waitSec * 1000);
+      }
     }
   }
 

@@ -34,16 +34,16 @@ function loadConfig() {
   const referrers = loadJson('referrers.json');
 
   const config = {
-    strategy: (process.env.STRATEGY || 'dryRun').trim(),
+    strategy: (process.env.STRATEGY || 'directLink').trim(),
     headless: bool(process.env.HEADLESS, true),
     chromeExecutablePath: (process.env.CHROME_EXECUTABLE_PATH || '').trim() || null,
 
     navigationTimeoutMs: int(process.env.NAVIGATION_TIMEOUT_MS, 60_000),
     defaultTimeoutMs: int(process.env.DEFAULT_TIMEOUT_MS, 30_000),
 
-    intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 60),
-    intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 900),
-    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 20),
+    intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 0),
+    intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 0),
+    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 0),
 
     viewport: {
       width: int(process.env.VIEWPORT_WIDTH, 1920),
@@ -51,7 +51,7 @@ function loadConfig() {
     },
 
     targetUrls: parseUrls(process.env.TARGET_URLS),
-    maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 15),
+    maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 0),
     includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
 
     proxy: {
