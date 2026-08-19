@@ -77,7 +77,7 @@
 - [x] Visitante novo a cada visita (contexto anônimo; `SESSION_PERSIST` é opt-in)
 - [x] Cookies isolados por visita (contexto anônimo; persistência é opt-in)
 - [x] Frequência irregular (`STEALTH_GAP_*`)
-- [x] Proxy + flags WebRTC (IP)
+- [x] Probe de egress + recusa de IP anon/datacenter (`PROXY_SKIP_FLAGGED`)
 - [x] Navegação humana (mouse, scroll, dwell)
 - [x] Fingerprint JS (platform, WebGL, tela, hardware)
 - [x] Sinais de automação (stealth plugin + flags)

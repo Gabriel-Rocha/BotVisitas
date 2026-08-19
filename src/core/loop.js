@@ -8,6 +8,7 @@ const {
 } = require('./proxy');
 const { createWorker } = require('./worker');
 const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices');
+const { isFlaggedAnonymousIp, lookupGeoViaProxy, lookupGeo } = require('./geo');
 
 /**
  * Resolve quantos workers subir (quando DEVICE_MIX não define a contagem).
@@ -57,6 +58,71 @@ function resolveProxyCap(config, strategy) {
   return null; // sem cap
 }
 
+/**
+ * Remove IPs de datacenter/VPN/anon do pool. Esses disparam
+ * "anonymous proxy detected" no site alvo — stealth de browser não resolve.
+ */
+async function selectUsableProxyPool(config, logger) {
+  const { pool } = buildProxyPool(config.proxy);
+  if (!pool.length) return { pool: [], usedDirect: false };
+
+  if (!config.proxy.skipFlagged) {
+    logger.warn(
+      'PROXY_SKIP_FLAGGED=false — IPs de datacenter/anon vão para o alvo e costumam responder "anonymous proxy detected".'
+    );
+    return { pool, usedDirect: false };
+  }
+
+  const clean = [];
+  for (const proxy of pool) {
+    try {
+      const geo = await lookupGeoViaProxy(proxy);
+      if (isFlaggedAnonymousIp(geo)) {
+        logger.warn(
+          `Proxy ${proxy.label} descartado | egress=${geo.ip || '?'} | ` +
+            `proxy=${Boolean(geo.isProxy)} hosting=${Boolean(geo.isHosting)}` +
+            (geo.isp ? ` | isp=${geo.isp}` : '')
+        );
+        continue;
+      }
+      logger.info(
+        `Proxy ${proxy.label} limpo | egress=${geo.ip || '?'} | cc=${geo.countryCode || '?'}`
+      );
+      clean.push(proxy);
+    } catch (err) {
+      logger.warn(`Proxy ${proxy.label} falhou no probe (${err.message}) — descartado`);
+    }
+  }
+
+  if (clean.length) return { pool: clean, usedDirect: false };
+
+  if (config.proxy.fallbackDirect) {
+    try {
+      const egress = await lookupGeo(null);
+      if (isFlaggedAnonymousIp(egress)) {
+        throw new Error(
+          'Nenhum proxy limpo e o IP desta máquina também é datacenter/anon ' +
+            `(${egress.ip || '?'} isp=${egress.isp || '?'}). ` +
+            'Não vou acessar o alvo para não disparar "anonymous proxy detected". ' +
+            'Troque PROXY_LIST por residencial/mobile.'
+        );
+      }
+    } catch (err) {
+      if (/Não vou acessar/.test(err.message)) throw err;
+      logger.warn(`Probe do IP local falhou (${err.message}) — seguindo direto com cautela`);
+    }
+    logger.warn(
+      'Nenhum proxy limpo no pool — conexão direta (sem proxy) para não disparar "anonymous proxy detected".'
+    );
+    return { pool: [], usedDirect: true };
+  }
+
+  throw new Error(
+    'Nenhum proxy limpo no pool (todos datacenter/anon ou probe falhou). ' +
+      'Use residencial/mobile ou PROXY_FALLBACK_DIRECT=true. Ver docs/09-proxies-webshare.md'
+  );
+}
+
 function createLoop({ config, strategy, logger }) {
   const workers = [];
   let proxyLease = null;
@@ -85,10 +151,33 @@ function createLoop({ config, strategy, logger }) {
 
     deviceSummary = summarizeDevices(types);
 
-    if (config.proxy?.enabled) {
+    let effectiveProxyOn = Boolean(config.proxy?.enabled);
+    if (config.proxy?.enabled && strategy.requiresBrowser !== false) {
+      const selected = await selectUsableProxyPool(config, logger);
+      if (selected.usedDirect) {
+        effectiveProxyOn = false;
+        proxyLease = null;
+      } else {
+        proxyLease = createProxyLease(selected.pool);
+        const capped = Math.min(types.length, selected.pool.length, FREE_PLAN_MAX);
+        if (capped < types.length) {
+          logger.warn(
+            `Workers reduzidos de ${types.length} para ${capped} após filtrar proxies anônimos.`
+          );
+          types.length = capped;
+        }
+      }
+    } else if (config.proxy?.enabled) {
       const { pool } = buildProxyPool(config.proxy);
       proxyLease = createProxyLease(pool);
     }
+
+    if (!effectiveProxyOn && strategy.requiresBrowser !== false && types.length > 1) {
+      logger.warn('Sem proxy limpo — 1 worker (mesmo IP).');
+      types.length = 1;
+    }
+
+    deviceSummary = summarizeDevices(types);
 
     const mixLabel = Object.entries(deviceSummary)
       .map(([k, v]) => `${k}:${v}`)
@@ -145,4 +234,4 @@ function createLoop({ config, strategy, logger }) {
   return { run, stop, getStats, captureWorkerPreview };
 }
 
-module.exports = { createLoop, resolveConcurrency };
+module.exports = { createLoop, resolveConcurrency, selectUsableProxyPool };

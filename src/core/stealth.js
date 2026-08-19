@@ -19,9 +19,10 @@ function getStealthLaunchArgs({ lang = 'pt-BR' } = {}) {
   const language = String(lang || 'pt-BR').trim() || 'pt-BR';
   return [
     '--disable-blink-features=AutomationControlled',
-    // Evita vazamento de IP local via WebRTC sem derrubar APIs usadas pelo site.
     '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+    '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--enforce-webrtc-ip-permission-check',
+    '--disable-ipv6',
     `--lang=${language}`,
     '--disable-infobars',
   ];
