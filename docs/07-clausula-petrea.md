@@ -33,8 +33,9 @@
 - Config: `clickSelector` em `src/config/index.js`.
 
 ### 2.2 Fixture de teste local
-- `scripts/test-server.js` + `npm run test:server` — página em `:3000` com botão `#cta`
-  e contador visível, para validar o fluxo acesso+clique sem depender de nada externo.
+- `scripts/test-server.js` + `npm run test:server` — página preferencialmente em `:3000`
+  com botão `#cta` e contador visível (se a porta estiver ocupada, tenta a próxima),
+  para validar o fluxo acesso+clique sem depender de nada externo.
 
 ### 2.3 Documentação
 - `docs/05-referencia-tecnica.md` (novo) — referência completa.

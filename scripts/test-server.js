@@ -5,7 +5,7 @@
  * Zero dependências (http nativo).
  *
  *   npm run test:server        # sobe em http://localhost:3000
- *   TEST_SERVER_PORT=4000 ...  # porta alternativa
+ *   TEST_SERVER_PORT=4000 ...  # porta preferida; se ocupada, tenta a próxima
  *
  * A página tem um botão #cta com contador visível (e window.__clicks), então
  * dá pra confirmar que o bot realmente clicou.
@@ -13,7 +13,8 @@
 
 const http = require('http');
 
-const PORT = Number.parseInt(process.env.TEST_SERVER_PORT, 10) || 3000;
+const PREFERRED_PORT = Number.parseInt(process.env.TEST_SERVER_PORT, 10) || 3000;
+const MAX_PORT_TRIES = 20;
 // Escuta em 0.0.0.0 para o container Docker alcançar via host.docker.internal
 const HOST = process.env.TEST_SERVER_HOST || '0.0.0.0';
 
@@ -44,12 +45,30 @@ const PAGE = `<!doctype html>
 </body>
 </html>`;
 
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(PAGE);
-  })
-  .listen(PORT, HOST, () => {
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.end(PAGE);
+});
+
+function listen(port, attemptsLeft) {
+  server.once('error', (err) => {
+    if (err.code === 'EADDRINUSE' && attemptsLeft > 0) {
+      const next = port + 1;
+      // eslint-disable-next-line no-console
+      console.warn(`Porta ${port} ocupada — tentando ${next}`);
+      listen(next, attemptsLeft - 1);
+      return;
+    }
     // eslint-disable-next-line no-console
-    console.log(`Test server no ar: http://localhost:${PORT}  (botão: #cta)`);
+    console.error(`Não foi possível escutar em ${HOST}:${port}: ${err.message}`);
+    process.exit(1);
   });
+  server.listen(port, HOST, () => {
+    const addr = server.address();
+    const used = addr && typeof addr === 'object' ? addr.port : port;
+    // eslint-disable-next-line no-console
+    console.log(`Test server no ar: http://localhost:${used}  (botão: #cta)`);
+  });
+}
+
+listen(PREFERRED_PORT, MAX_PORT_TRIES);

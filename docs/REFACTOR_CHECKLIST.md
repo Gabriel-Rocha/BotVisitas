@@ -59,6 +59,8 @@
 - [x] Contadores + restart periódico (opt-in)
 - [x] Timeouts finitos + sleep Promise
 - [x] SIGINT / SIGTERM
+- [x] Porta ocupada: sandbox Compose usa porta livre (`TESTPAGE_PORT=0`); dashboard/test-server tentam a próxima
+- [x] Log de boot do dashboard com o link do host (`Rodando nesse link aqui:`)
 
 ### FASE 7 — Docs
 - [x] Docs alinhadas ao v2

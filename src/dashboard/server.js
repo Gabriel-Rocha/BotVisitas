@@ -7,6 +7,7 @@ const { initDb, closePool, logQueue } = require('../db');
 require('../config');
 
 const PORT = Number.parseInt(process.env.DASHBOARD_PORT || '3847', 10);
+const MAX_PORT_TRIES = 20;
 // 0.0.0.0 = acessível via porta publicada no Docker; 127.0.0.1 só funciona dentro do container
 const HOST = process.env.DASHBOARD_HOST || '0.0.0.0';
 
@@ -15,16 +16,39 @@ const app = createApp();
 
 let server = null;
 
-async function boot() {
-  await initDb(logger);
-  server = app.listen(PORT, HOST, () => {
-    logger.info(`Dashboard em http://${HOST}:${PORT}`);
+function publicDashboardUrl(host, port) {
+  const openHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
+  return `http://${openHost}:${port}`;
+}
+
+function listen(port, attemptsLeft) {
+  const s = app.listen(port, HOST);
+  s.once('error', (err) => {
+    if (err.code === 'EADDRINUSE' && attemptsLeft > 0) {
+      const next = port + 1;
+      logger.warn(`Porta ${port} ocupada — tentando ${next}`);
+      listen(next, attemptsLeft - 1);
+      return;
+    }
+    logger.error(`Não foi possível escutar em ${HOST}:${port}: ${err.message}`);
+    process.exit(1);
+  });
+  s.once('listening', () => {
+    server = s;
+    const addr = s.address();
+    const used = addr && typeof addr === 'object' ? addr.port : port;
+    logger.info(`Rodando nesse link aqui: ${publicDashboardUrl(HOST, used)}`);
     if ((process.env.DASHBOARD_TOKEN || '').trim()) {
       logger.info('Auth: X-Dashboard-Token obrigatório');
     } else {
       logger.warn('DASHBOARD_TOKEN vazio — API aberta no bind local');
     }
   });
+}
+
+async function boot() {
+  await initDb(logger);
+  listen(PORT, MAX_PORT_TRIES);
 }
 
 async function shutdown(signal) {

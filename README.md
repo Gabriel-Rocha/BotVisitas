@@ -81,7 +81,7 @@ Opcional — forçar browser do sistema:
 CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome
 ```
 
-Fixture local opcional: `npm run test:server` + `TARGET_URLS=http://localhost:3000`.
+Fixture local opcional: `npm run test:server` + `TARGET_URLS=http://localhost:3000` (se a 3000 estiver ocupada, o servidor tenta a próxima porta). No Docker, o alvo da sandbox é `http://testpage:3000`.
 
 | Nome | Status |
 |------|--------|
@@ -117,7 +117,7 @@ src/
   utils/            # logger, random, sleep
 web/                # React + Vite (dashboard UI)
 scripts/
-  test-server.js    # página de teste local :3000
+  test-server.js    # página de teste local (3000 ou próxima livre)
 ```
 
 ## Colaborando

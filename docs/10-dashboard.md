@@ -27,8 +27,9 @@ docker compose up -d --build
 # http://localhost:3847
 ```
 
-Compose define `DASHBOARD_HOST=0.0.0.0`, publica `3847` e sobe o Postgres com volume
-`botvisitas_pg_data` (dados sobrevivem a stop/restart/`down` sem `-v`).
+Compose define `DASHBOARD_HOST=0.0.0.0`, publica `DASHBOARD_PORT` (default `3847`) e sobe o Postgres com volume
+`botvisitas_pg_data` (dados sobrevivem a stop/restart/`down` sem `-v`). A sandbox `testpage` usa
+`TESTPAGE_PORT=0` no host (porta livre) e `http://testpage:3000` na rede interna.
 
 ## Auth
 
