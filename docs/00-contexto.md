@@ -10,20 +10,21 @@ Projeto pensado para **vários colaboradores** e execução em **vários disposi
 - Node.js + **CommonJS**
 - puppeteer + puppeteer-extra + stealth
 - dotenv (config)
-- Sem DB / API / UI no v1 rebuild inicial; **Postgres** agora persiste histórico do dashboard (runs, logs, snapshots)
-- Proxies: **interface pronta, uso desligado**
+- Sem DB / API / UI no v1
+- Proxies: interface pronta, ligada só se `PROXY_ENABLED=true`
 
-## Default seguro
+## Default
 
-`STRATEGY=dryRun` — valida o pipeline sem browser e sem abrir URLs.
-Para acessar links (incl. smartlinks), use `STRATEGY=directLink` + `TARGET_URLS`.
+`STRATEGY=directLink` — visita `TARGET_URLS` em loop. Sem espera entre iterações (`INTERVAL_*=0`).
+
+`dryRun` permanece disponível como opt-in (`npm run start:dry`).
 
 ## Chromium — quando é necessário?
 
 | Strategy | Precisa de browser? |
 |----------|---------------------|
-| `dryRun` (default) | **Não** |
-| `directLink` | **Sim** — Chromium do Puppeteer ou `CHROME_EXECUTABLE_PATH` |
+| `directLink` (default) | **Sim** — Chromium do Puppeteer ou `CHROME_EXECUTABLE_PATH` |
+| `dryRun` | **Não** |
 
 ```bash
 npm run browsers:install

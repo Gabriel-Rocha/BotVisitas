@@ -98,19 +98,32 @@ function createLoop({ config, strategy, logger }) {
       `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | proxy=${Boolean(proxyLease)}`
     );
 
-    for (let i = 0; i < types.length; i += 1) {
-      const { type, profile } = getProfile(config.deviceProfiles, types[i]);
-      workers.push(
-        createWorker({
-          workerId: i,
-          config,
-          strategy,
-          logger,
-          proxyLease,
-          deviceType: type,
-          deviceProfile: profile,
-        })
-      );
+    while (!stopping) {
+      try {
+        await tick();
+      } catch (err) {
+        stats.errors += 1;
+        logger.error('Erro na iteração:', err.message);
+        logger.debug(err.stack);
+
+        if (needsBrowser) {
+          try {
+            page = await recreateSession(browser, page, config, logger);
+          } catch {
+            await closeBrowser(browser, logger);
+            browser = null;
+            page = null;
+          }
+        }
+      }
+
+      if (stopping) break;
+
+      const waitSec = randomInt(config.intervalMinSec, config.intervalMaxSec);
+      if (waitSec > 0) {
+        logger.info(`Aguardando ${waitSec}s até a próxima iteração...`);
+        await sleep(waitSec * 1000);
+      }
     }
 
     await Promise.all(workers.map((w) => w.run()));

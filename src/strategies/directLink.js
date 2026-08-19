@@ -4,88 +4,6 @@ const { pick, randomInt } = require('../utils/random');
 const { sleep } = require('../utils/sleep');
 const { humanBrowsePause, navigateLikeHuman } = require('../core/stealth');
 
-/**
- * Direct link — visita TARGET_URLS e navega pelo site (mesmo host).
- * Comportamento humanizado (ofuscação): scroll suave, mouse, dwell, clique em links.
- * Sem clique forçado em CTA.
- */
-
-async function waitSettled(page) {
-  try {
-    await page.waitForNetworkIdle({ idleTime: 800, timeout: 8_000 });
-  } catch {
-    // páginas com polling eterno
-  }
-}
-
-async function readPageMeta(page) {
-  let title = '';
-  let bodyLen = 0;
-  try {
-    title = await page.title();
-    bodyLen = await page.evaluate(() =>
-      document.body && document.body.innerText
-        ? document.body.innerText.trim().length
-        : 0
-    );
-  } catch {
-    // ignore
-  }
-  return { title, bodyLen, finalUrl: page.url() };
-}
-
-async function collectInternalLinks(page, hostname) {
-  return page.evaluate((host) => {
-    const seen = new Set();
-    const out = [];
-    for (const a of document.querySelectorAll('a[href]')) {
-      let u;
-      try {
-        u = new URL(a.getAttribute('href'), location.href);
-      } catch {
-        continue;
-      }
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
-      if (u.hostname !== host) continue;
-      const clean = `${u.origin}${u.pathname}${u.search}`;
-      if (seen.has(clean)) continue;
-      // ignora âncoras na mesma página
-      if (u.pathname === location.pathname && u.search === location.search) continue;
-      seen.add(clean);
-      out.push(clean);
-    }
-    return out;
-  }, hostname);
-}
-
-async function browsePage(page, url, logger, label, { preferClick = false } = {}) {
-  logger.info(`${label}: ${url}`);
-
-  let navVia = 'goto';
-  let resp = null;
-  if (preferClick) {
-    const nav = await navigateLikeHuman(page, url, logger);
-    navVia = nav.via;
-  } else {
-    resp = await page.goto(url, { waitUntil: 'domcontentloaded' });
-  }
-
-  const status = resp ? resp.status() : null;
-  await waitSettled(page);
-
-  const dwellSec = await humanBrowsePause(page, randomInt(5, 14));
-  logger.info(`Lendo página (~${dwellSec}s, via=${navVia})...`);
-
-  const meta = await readPageMeta(page);
-  logger.info(
-    `Resposta: status=${status ?? 'n/a'} | title="${meta.title}" | final=${meta.finalUrl} | texto≈${meta.bodyLen} chars`
-  );
-  if (!meta.title && meta.bodyLen < 40) {
-    logger.warn('Página quase vazia (title vazio + pouco texto).');
-  }
-  return { status, navVia, ...meta };
-}
-
 async function run(page, { config, logger }) {
   if (!config.targetUrls.length) {
     throw new Error('STRATEGY=directLink exige TARGET_URLS no .env');
@@ -124,7 +42,10 @@ async function run(page, { config, logger }) {
       break;
     }
 
-    const next = pick(candidates);
+  const x = config.viewport.width / 2;
+  const y = config.viewport.height / 2;
+  const maxClicks = config.maxClicksPerPage;
+  const clicks = maxClicks <= 0 ? 1 : randomInt(1, maxClicks);
 
     try {
       const step = await browsePage(page, next, logger, `Navegação ${i + 1}/${extraPages}`, {

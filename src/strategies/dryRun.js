@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Estratégia segura para validar config/loop em qualquer device.
- * Não sobe browser e não acessa smartlinks.
+ * Opt-in para validar config/loop sem subir browser.
+ * Não é o default — produção usa directLink.
  */
 async function run(_page, { config, logger }) {
   const wouldVisit = config.targetUrls.length

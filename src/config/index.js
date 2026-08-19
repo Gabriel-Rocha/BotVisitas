@@ -71,21 +71,16 @@ function loadConfig() {
   const deviceProfiles = loadJson('device-profiles.json');
 
   const config = {
-    strategy: (process.env.STRATEGY || 'dryRun').trim(),
+    strategy: (process.env.STRATEGY || 'directLink').trim(),
     headless: bool(process.env.HEADLESS, true),
     chromeExecutablePath: (process.env.CHROME_EXECUTABLE_PATH || '').trim() || null,
 
     navigationTimeoutMs: int(process.env.NAVIGATION_TIMEOUT_MS, 60_000),
     defaultTimeoutMs: int(process.env.DEFAULT_TIMEOUT_MS, 30_000),
 
-    intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 60),
-    intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 900),
-    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 20),
-    concurrency: int(process.env.CONCURRENCY, 5),
-
-    // vazio = todos desktop via CONCURRENCY | ex.: desktop:2,mobile:3,tablet:1
-    deviceMix: (process.env.DEVICE_MIX || '').trim(),
-    deviceProfiles,
+    intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 0),
+    intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 0),
+    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 0),
 
     viewport: {
       width: int(process.env.VIEWPORT_WIDTH, 1920),
@@ -93,9 +88,7 @@ function loadConfig() {
     },
 
     targetUrls: parseUrls(process.env.TARGET_URLS),
-    maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 15),
-    browsePagesMin: int(process.env.BROWSE_PAGES_MIN, 1),
-    browsePagesMax: int(process.env.BROWSE_PAGES_MAX, 3),
+    maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 0),
     includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
     clickSelector: (process.env.CLICK_SELECTOR || '').trim() || null,
 

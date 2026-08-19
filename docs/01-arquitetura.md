@@ -22,16 +22,12 @@ BotVisitas/
 │   ├── core/
 │   │   ├── browser.js
 │   │   ├── session.js
-│   │   ├── worker.js       # 1 Chromium + 1 proxy + 1 device profile
-│   │   ├── loop.js         # orquestra N workers / DEVICE_MIX
-│   │   ├── devices.js      # parse mix + personas
-│   │   ├── proxy.js        # lease exclusivo (máx. 10)
-│   │   ├── geo.js          # IP → timezone/locale (ofuscação)
-│   │   └── stealth.js      # ofuscação (fingerprint + WebRTC + humanize)
+│   │   ├── loop.js
+│   │   └── proxy.js
 │   ├── strategies/
 │   │   ├── index.js        # registry
-│   │   ├── dryRun.js       # DEFAULT
-│   │   └── directLink.js   # desligado por default
+│   │   ├── directLink.js   # DEFAULT
+│   │   └── dryRun.js       # opt-in
 │   ├── data/
 │   │   ├── device-profiles.json
 │   │   ├── user-agents.json
@@ -50,19 +46,19 @@ BotVisitas/
 ```
 index → loadConfig → resolveStrategy → createLoop
                          ↓
-              browser.launch (proxy stub se enabled)
+              browser.launch (proxy se enabled)
                          ↓
               session → strategy.run(page, ctx)
                          ↓
-              sleep → restart browser se necessário → repeat
+              sleep (se INTERVAL > 0) → restart browser se necessário → repeat
 ```
 
 ## Contrato de strategy
 
 ```js
 module.exports = {
-  name: 'dryRun',
-  requiresBrowser: false, // false = loop não lança Chromium
+  name: 'directLink',
+  requiresBrowser: true, // false = loop não lança Chromium
   async run(page, { config, logger }) {
     return { ok: true, meta: {} };
   },

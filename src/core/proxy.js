@@ -1,16 +1,8 @@
 'use strict';
 
 /**
- * Proxies — pensado para o plano free Webshare (máx. 10).
- * https://www.webshare.io/pricing
- *
- * Formatos aceitos por entrada:
- *   http://user:pass@host:port
- *   host:port:user:pass          (export típico Webshare)
- *   host:port
- *
- * Chromium: --proxy-server SEM credenciais + page.authenticate().
- * Workers: acquire/release exclusivo (1 proxy = 1 browser por vez).
+ * Proxy via env: PROXY_ENABLED + PROXY_SERVER.
+ * Devolve args do Chromium quando habilitado.
  */
 
 const FREE_PLAN_MAX = 10;
@@ -150,18 +142,9 @@ function assertProxyReady(proxyConfig, logger) {
     logger.debug('Proxy desabilitado.');
     return;
   }
-
-  const { pool, max } = buildProxyPool(proxyConfig);
-  if (!pool.length) {
-    throw new Error(
-      'PROXY_ENABLED=true mas nenhuma proxy configurada (PROXY_LIST ou PROXY_SERVER)'
-    );
-  }
-
-  if ((proxyConfig.list?.length || 0) > FREE_PLAN_MAX) {
-    logger.warn(
-      `PROXY_LIST tem mais de ${FREE_PLAN_MAX} entradas — plano free Webshare: usando só as ${max} primeiras.`
-    );
+  logger.info(`Proxy habilitado: ${proxyConfig.server}`);
+  if (!proxyConfig.server) {
+    throw new Error('PROXY_SERVER obrigatório quando PROXY_ENABLED=true');
   }
 
   logger.info(
