@@ -3,68 +3,44 @@
 const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { getProxyLaunchArgs } = require('./proxy');
-const { getStealthLaunchArgs } = require('./stealth');
+const { sessionPaths } = require('./identity');
+const { getLaunchArgs, findChromeExecutable } = require('./stealth');
+const { assertProxyReady } = require('./proxy');
 
 puppeteer.use(StealthPlugin());
 
-const SYSTEM_CHROME_CANDIDATES = [
-  process.env.CHROME_EXECUTABLE_PATH,
-  process.env.PUPPETEER_EXECUTABLE_PATH,
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-].filter(Boolean);
+async function launchBrowser(config, logger, identity) {
+  assertProxyReady(config.proxy, logger);
 
-function resolveChromePath(configured) {
-  const candidates = [configured, ...SYSTEM_CHROME_CANDIDATES].filter(Boolean);
-  for (const candidate of candidates) {
-    const p = String(candidate).trim();
-    if (p && fs.existsSync(p)) return p;
-  }
-  return null;
-}
-
-/**
- * @param {object} config
- * @param {object} logger
- * @param {object|null} [forcedProxy] — proxy já adquirido pelo worker (lease exclusivo)
- * @param {{ lang?: string }} [stealthOpts]
- */
-async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {}) {
-  const activeProxy = forcedProxy || null;
-  if (activeProxy) {
-    logger.info(`Proxy selecionado: ${activeProxy.label}`);
-  }
-
-  const args = [
-    '--disable-dev-shm-usage',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-popup-blocking',
-    '--disable-notifications',
-    '--ignore-certificate-errors',
-    ...getStealthLaunchArgs({ lang: stealthOpts.lang }),
-    ...getProxyLaunchArgs(activeProxy),
-  ];
+  const args = getLaunchArgs(config, identity, {
+    attachProxy: Boolean(config.session.persist),
+  });
+  const executablePath = findChromeExecutable(config);
+  const files = sessionPaths(config);
 
   const options = {
     headless: config.headless ? 'new' : false,
     args,
     ignoreDefaultArgs: ['--enable-automation'],
     defaultViewport: null,
+    ignoreHTTPSErrors: true,
   };
 
-  const chromePath = resolveChromePath(config.chromeExecutablePath);
-  if (chromePath) {
-    options.executablePath = chromePath;
-    logger.info(`Usando browser do sistema: ${chromePath}`);
-  } else {
-    logger.warn(
-      'Nenhum Chromium do sistema encontrado — tentando o embutido do Puppeteer (pode falhar no Docker).'
-    );
+  if (config.session.persist) {
+    options.userDataDir = files.chromeProfile;
   }
+
+  if (executablePath) {
+    options.executablePath = executablePath;
+    logger.info(`Usando Chrome do sistema: ${executablePath}`);
+  } else {
+    logger.info('Usando Chromium embutido do Puppeteer (TLS/JA3 mais fraco que Chrome real)');
+  }
+
+  options.env = {
+    ...process.env,
+    LANGUAGE: identity.locale || 'pt-BR',
+  };
 
   const browser = await puppeteer.launch(options);
   logger.info('Browser iniciado');

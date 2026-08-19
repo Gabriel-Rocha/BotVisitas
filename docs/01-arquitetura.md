@@ -9,10 +9,10 @@ BotVisitas/
 ├── .dockerignore
 ├── docs/
 ├── config/                 # overrides locais (opcional)
-├── logs/                   # gitignored (volume no Docker)
+├── logs/                   # gitignored (inclui sessão Chrome)
 ├── scripts/
-│   └── start.sh            # atalho → docker compose up
-├── web/                    # React + Vite (dashboard)
+│   ├── start.sh
+│   └── smoke-stealth.js
 ├── src/
 │   ├── index.js            # CLI entrypoint
 │   ├── dashboard/          # Express API + botRuntime
@@ -23,13 +23,16 @@ BotVisitas/
 │   │   ├── browser.js
 │   │   ├── session.js
 │   │   ├── loop.js
-│   │   └── proxy.js
+│   │   ├── proxy.js
+│   │   ├── identity.js     # visitante (fingerprint coerente)
+│   │   ├── stealth.js      # headers, JS, flags, TLS via Chrome
+│   │   └── human.js        # mouse/scroll/dwell
 │   ├── strategies/
-│   │   ├── index.js        # registry
+│   │   ├── index.js
 │   │   ├── directLink.js   # DEFAULT
-│   │   └── dryRun.js       # opt-in
+│   │   └── dryRun.js
 │   ├── data/
-│   │   ├── device-profiles.json
+│   │   ├── browser-profiles.json
 │   │   ├── user-agents.json
 │   │   └── referrers.json
 │   └── utils/
@@ -46,11 +49,15 @@ BotVisitas/
 ```
 index → loadConfig → resolveStrategy → createLoop
                          ↓
-              browser.launch (proxy se enabled)
+              browser.launch (Chrome + stealth flags)
                          ↓
-              session → strategy.run(page, ctx)
+              a cada visita: visitante novo (contexto anônimo)
                          ↓
-              sleep (se INTERVAL > 0) → restart browser se necessário → repeat
+              identity + proxy + fingerprint + cookies zerados
+                         ↓
+              strategy.run (navegação humana)
+                         ↓
+              fecha contexto → gap irregular → repeat
 ```
 
 ## Contrato de strategy
@@ -58,8 +65,8 @@ index → loadConfig → resolveStrategy → createLoop
 ```js
 module.exports = {
   name: 'directLink',
-  requiresBrowser: true, // false = loop não lança Chromium
-  async run(page, { config, logger }) {
+  requiresBrowser: true,
+  async run(page, { config, logger, identity }) {
     return { ok: true, meta: {} };
   },
 };
@@ -83,5 +90,5 @@ DEVICE_MIX=desktop:2,mobile:2,tablet:1
 Também:
 - Config só via env (sem paths absolutos de um SO)
 - Browser só se `requiresBrowser: true`
-- `CHROME_EXECUTABLE_PATH` opcional
+- `CHROME_EXECUTABLE_PATH` opcional; autodetect ligado por default
 - `npm start` em qualquer OS com Node >= 18

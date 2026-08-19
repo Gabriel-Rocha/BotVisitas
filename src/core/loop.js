@@ -1,57 +1,113 @@
 'use strict';
 
+const { launchBrowser, closeBrowser } = require('./browser');
+const { createSession, createVisitorContext, closePage, closeContext } = require('./session');
 const {
-  buildProxyPool,
-  createProxyLease,
-  assertProxyReady,
-  FREE_PLAN_MAX,
-} = require('./proxy');
-const { createWorker } = require('./worker');
-const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices');
+  createBaseIdentity,
+  loadOrCreateBaseIdentity,
+  finalizeIdentity,
+  saveIdentity,
+  persistCookies,
+  nextVisitor,
+} = require('./identity');
+const { computeGapMs } = require('./stealth');
+const { sleep } = require('../utils/sleep');
 
-/**
- * Resolve quantos workers subir (quando DEVICE_MIX não define a contagem).
- * - dryRun sem proxy: CONCURRENCY livre (default 5)
- * - directLink sem proxy: força 1 (mesmo IP sem ganho)
- * - com proxy: min(CONCURRENCY, poolSize, 10)
- */
-function resolveConcurrency(config, strategy, logger) {
-  let n = Math.max(1, config.concurrency || 1);
+function createLoop({ config, strategy, logger }) {
   const needsBrowser = strategy.requiresBrowser !== false;
-  const proxyOn = config.proxy?.enabled;
+  const rotate = !config.session.persist;
 
-  if (needsBrowser && !proxyOn) {
-    if (n > 1) {
-      logger.warn(
-        'CONCURRENCY>1 sem PROXY_ENABLED — forçando 1 worker (mesmo IP sem ganho).'
-      );
-    }
-    return 1;
+  const stats = {
+    startedAt: Date.now(),
+    iterations: 0,
+    ok: 0,
+    errors: 0,
+  };
+
+  let browser = null;
+  let context = null;
+  let page = null;
+  let identity = null;
+  let chromeVersion = null;
+  let stopping = false;
+
+  async function teardownBrowser() {
+    await closePage(page);
+    page = null;
+    await closeContext(context);
+    context = null;
+    await closeBrowser(browser, logger);
+    browser = null;
+    chromeVersion = null;
+    identity = null;
   }
 
-  if (proxyOn) {
-    const { pool } = buildProxyPool(config.proxy);
-    const capped = Math.min(n, pool.length, FREE_PLAN_MAX);
-    if (capped < n) {
-      logger.warn(
-        `CONCURRENCY=${n} reduzido para ${capped} (pool=${pool.length}, max=${FREE_PLAN_MAX}).`
-      );
-    }
-    return Math.max(1, capped);
+  async function ensureBrowser() {
+    if (!needsBrowser) return;
+    if (browser && browser.isConnected()) return;
+    await teardownBrowser();
+    const launchIdentity = createBaseIdentity(config);
+    browser = await launchBrowser(config, logger, launchIdentity);
+    chromeVersion = await browser.version();
+    logger.debug(`Chrome reportado: ${chromeVersion}`);
   }
 
-  return n;
-}
+  async function openVisit() {
+    await ensureBrowser();
+    if (!needsBrowser) return;
 
-function resolveProxyCap(config, strategy) {
-  const needsBrowser = strategy.requiresBrowser !== false;
-  const proxyOn = config.proxy?.enabled;
+    if (!rotate) {
+      if (page && !page.isClosed()) return;
+      identity = loadOrCreateBaseIdentity(config, logger);
+      identity = finalizeIdentity(identity, chromeVersion);
+      saveIdentity(config, identity);
+      page = await createSession(browser, config, logger, identity);
+      return;
+    }
 
-  if (needsBrowser && !proxyOn) return 1;
+    identity = nextVisitor(config, chromeVersion, logger);
+    context = await createVisitorContext(browser, identity);
+    page = await createSession(context, config, logger, identity);
+  }
 
-  if (proxyOn) {
-    const { pool } = buildProxyPool(config.proxy);
-    return Math.min(pool.length, FREE_PLAN_MAX);
+  async function finishVisit() {
+    if (!needsBrowser) return;
+    if (!rotate) {
+      await persistCookies(page, config, logger);
+      return;
+    }
+    await closePage(page);
+    page = null;
+    await closeContext(context);
+    context = null;
+    identity = null;
+  }
+
+  async function maybeRestartBrowser() {
+    if (!needsBrowser) return;
+    const every = config.browserRestartEvery;
+    if (!every || every <= 0) return;
+    if (stats.iterations === 0 || stats.iterations % every !== 0) return;
+
+    logger.info(`Restart periódico do browser (#${stats.iterations})`);
+    await teardownBrowser();
+  }
+
+  async function tick() {
+    await openVisit();
+    try {
+      const result = await strategy.run(page, { config, logger, identity });
+      if (result?.ok) stats.ok += 1;
+      else stats.errors += 1;
+    } catch (err) {
+      stats.errors += 1;
+      logger.error('Erro na iteração:', err.message);
+      logger.debug(err.stack);
+    } finally {
+      stats.iterations += 1;
+      await finishVisit();
+    }
+    await maybeRestartBrowser();
   }
 
   return null; // sem cap
@@ -95,7 +151,7 @@ function createLoop({ config, strategy, logger }) {
       .join(', ');
 
     logger.info(
-      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | proxy=${Boolean(proxyLease)}`
+      `Loop iniciado | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'} | stealth=${config.stealth.enabled} | visitantes=${rotate ? 'novos a cada visita' : 'sessão persistente'}`
     );
 
     while (!stopping) {
@@ -103,26 +159,17 @@ function createLoop({ config, strategy, logger }) {
         await tick();
       } catch (err) {
         stats.errors += 1;
-        logger.error('Erro na iteração:', err.message);
+        logger.error('Falha ao preparar visita:', err.message);
         logger.debug(err.stack);
-
-        if (needsBrowser) {
-          try {
-            page = await recreateSession(browser, page, config, logger);
-          } catch {
-            await closeBrowser(browser, logger);
-            browser = null;
-            page = null;
-          }
-        }
+        await teardownBrowser();
       }
 
       if (stopping) break;
 
-      const waitSec = randomInt(config.intervalMinSec, config.intervalMaxSec);
-      if (waitSec > 0) {
-        logger.info(`Aguardando ${waitSec}s até a próxima iteração...`);
-        await sleep(waitSec * 1000);
+      const waitMs = computeGapMs(config);
+      if (waitMs > 0) {
+        logger.info(`Aguardando ${(waitMs / 1000).toFixed(1)}s até a próxima iteração...`);
+        await sleep(waitMs);
       }
     }
 
@@ -132,8 +179,11 @@ function createLoop({ config, strategy, logger }) {
   async function stop() {
     if (stopping) return;
     stopping = true;
-    logger.info('Encerrando workers...', JSON.stringify(getStats()));
-    await Promise.all(workers.map((w) => w.stop()));
+    logger.info('Encerrando loop...', JSON.stringify(getStats()));
+    if (needsBrowser) {
+      if (!rotate) await persistCookies(page, config, logger);
+      await teardownBrowser();
+    }
   }
 
   function getStats() {

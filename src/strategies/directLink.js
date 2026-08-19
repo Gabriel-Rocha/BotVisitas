@@ -1,78 +1,66 @@
 'use strict';
 
-const { pick, randomInt } = require('../utils/random');
-const { sleep } = require('../utils/sleep');
-const { humanBrowsePause, navigateLikeHuman } = require('../core/stealth');
+const { pick, randomInt, chance } = require('../utils/random');
+const { humanClick, browseLikeHuman, clickPoint, dwell } = require('../core/human');
+const { extraHttpHeaders } = require('../core/stealth');
+const { sleepRange } = require('../utils/sleep');
 
-async function run(page, { config, logger }) {
+async function gotoTarget(page, url, referer, identity) {
+  const opts = { waitUntil: 'domcontentloaded' };
+  if (referer) opts.referer = referer;
+  try {
+    await page.goto(url, opts);
+  } catch (err) {
+    if (referer && identity) {
+      await page.setExtraHTTPHeaders({ ...extraHttpHeaders(identity), Referer: referer });
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      return;
+    }
+    throw err;
+  }
+}
+
+async function run(page, { config, logger, identity }) {
   if (!config.targetUrls.length) {
     throw new Error('STRATEGY=directLink exige TARGET_URLS no .env');
   }
 
+  const viewport = identity?.viewport || page.viewport() || config.viewport;
+  let referer = null;
+
   if (config.includeReferrer && config.referrers.length) {
-    const ref = pick(config.referrers);
-    logger.info(`Referrer: ${ref}`);
-    await page.goto(ref, { waitUntil: 'domcontentloaded' });
-    // Pausa curta no referrer (humano não pula instantâneo).
-    await sleep(randomInt(1200, 3500));
+    referer = pick(config.referrers);
+    if (chance(0.35)) {
+      logger.info(`Navegando pelo referrer: ${referer}`);
+      await page.goto(referer, { waitUntil: 'domcontentloaded' });
+      await browseLikeHuman(page, config);
+    } else {
+      logger.info(`Referrer (header): ${referer}`);
+    }
   }
 
-  const entryUrl = pick(config.targetUrls);
+  const url = pick(config.targetUrls);
+  logger.info(`Acessando: ${url}`);
+  await gotoTarget(page, url, referer, identity);
+  await browseLikeHuman(page, config);
 
-  const entryHost = new URL(entryUrl).hostname;
-  const visited = new Set();
-  const path = [];
-
-  const first = await browsePage(page, entryUrl, logger, 'Entrada', { preferClick: false });
-  visited.add(first.finalUrl.split('#')[0]);
-  path.push(first.finalUrl);
-
-  const pagesMin = Math.max(0, config.browsePagesMin ?? 1);
-  const pagesMax = Math.max(pagesMin, config.browsePagesMax ?? 3);
-  const extraPages = randomInt(pagesMin, pagesMax);
-
-  let links = await collectInternalLinks(page, entryHost);
-  logger.info(`Links internos encontrados: ${links.length}`);
-
-  let navigated = 0;
-  for (let i = 0; i < extraPages; i += 1) {
-    const candidates = links.filter((href) => !visited.has(href));
-    if (!candidates.length) {
-      logger.info('Sem mais links internos novos — encerrando navegação.');
-      break;
-    }
-
-  const x = config.viewport.width / 2;
-  const y = config.viewport.height / 2;
   const maxClicks = config.maxClicksPerPage;
   const clicks = maxClicks <= 0 ? 1 : randomInt(1, maxClicks);
 
-    try {
-      const step = await browsePage(page, next, logger, `Navegação ${i + 1}/${extraPages}`, {
-        preferClick: true,
-      });
-      visited.add(step.finalUrl.split('#')[0]);
-      path.push(step.finalUrl);
-      navigated += 1;
-      // atualiza pool de links a partir da página atual
-      const more = await collectInternalLinks(page, entryHost);
-      links = [...new Set([...links, ...more])];
-    } catch (err) {
-      logger.warn(`Falha ao abrir ${next}: ${err.message}`);
+  logger.info(`Cliques humanizados: ${clicks}`);
+  for (let i = 0; i < clicks; i += 1) {
+    const point = clickPoint(viewport);
+    if (config.stealth.humanize) {
+      await humanClick(page, point.x, point.y);
+    } else {
+      await page.mouse.click(point.x, point.y);
     }
+    if (i < clicks - 1) await sleepRange(180, 640);
   }
 
-  return {
-    ok: true,
-    meta: {
-      entryUrl,
-      path,
-      pagesVisited: path.length,
-      internalNavigations: navigated,
-      status: first.status,
-      title: first.title,
-    },
-  };
+  await dwell(config);
+
+  return { ok: true, meta: { url, clicks, profileId: identity?.profileId || null } };
 }
 
 module.exports = {

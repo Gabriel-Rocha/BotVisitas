@@ -2,7 +2,7 @@
 
 > **FONTE DA VERDADE.** Consultar sempre antes de alterar código.
 
-**Status geral:** `v2 rebuild` — base pronta; restrições de dryRun/intervalo removidas
+**Status geral:** `v2 rebuild` — stealth anti-detecção ligado no default
 
 ---
 
@@ -11,14 +11,15 @@
 | # | Decisão | Valor |
 |---|----------|-------|
 | 1 | Escopo | Reescrita do zero; colaborativo + multi-dispositivo |
-| 2 | Direct Link | **default = directLink** (2026-08-19: restrições de dryRun/intervalo removidas) |
-| 3 | Proxies | Interface pronta; `PROXY_ENABLED=false` até haver servidor |
+| 2 | Direct Link | **default = directLink** |
+| 3 | Proxies | Lista via env; rodízio por visitante (default) |
 | 4 | JS | **CommonJS** |
-| 5 | Chromium | Embutido no Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
+| 5 | Chromium | Chrome do sistema (autodetect) ou Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
 | 6 | Blog / GH Pages / fetch | Fora do v1 |
 | 7 | Headless | `HEADLESS=true` default; `start:headed` p/ debug |
-| 8 | Intervalo | Default 0–0 s (sem espera entre iterações) |
+| 8 | Intervalo | `INTERVAL_*=0` usa `STEALTH_GAP_*` (padrão humano irregular) |
 | 9 | Restart do browser | Default 0 (nunca), configurável via env |
+| 10 | Stealth | Ligado por default; visitante novo a cada visita |
 
 ---
 
@@ -52,7 +53,7 @@
 - [x] registry
 
 ### FASE 5 — Proxies
-- [x] Stub documentado (sem rotação real)
+- [x] Lista + auth + WebRTC lock (sem health-check)
 
 ### FASE 6 — Robustez
 - [x] Contadores + restart periódico (opt-in)
@@ -64,39 +65,39 @@
 
 ### FASE 8 — Sem restrições operacionais
 - [x] Default `STRATEGY=directLink`
-- [x] Intervalo default 0 (sem espera)
+- [x] Intervalo default 0 (cai no gap stealth)
 - [x] Sem restart periódico obrigatório
 - [x] Sem aviso de “links fora de uso”
 - [x] `dryRun` permanece só como opt-in
+
+### FASE 9 — Stealth / anti-detecção
+- [x] User-Agent + headers HTTP / client hints alinhados ao Chrome real
+- [x] Visitante novo a cada visita (contexto anônimo; `SESSION_PERSIST` é opt-in)
+- [x] Cookies isolados por visita (contexto anônimo; persistência é opt-in)
+- [x] Frequência irregular (`STEALTH_GAP_*`)
+- [x] Proxy + flags WebRTC (IP)
+- [x] Navegação humana (mouse, scroll, dwell)
+- [x] Fingerprint JS (platform, WebGL, tela, hardware)
+- [x] Sinais de automação (stealth plugin + flags)
+- [x] TLS via Chrome do sistema (JA3 = binário; sem spoof de TLS)
 
 ---
 
 ## Backlog (pós-v2)
 
-- [ ] Lint (eslint) + script `npm test` smoke
-- [x] Docker — forma padrão de execução (`Dockerfile` + `docker-compose.yml` + `docs/08-docker.md`)
-- [x] Proxy Webshare free (máx. 10) — lease exclusivo + workers (`docs/09-proxies-webshare.md`)
-- [x] Workers concorrentes (`CONCURRENCY`, default 5)
-- [x] Multi-agentes por device (`DEVICE_MIX` + `device-profiles.json`)
-- [x] Dashboard UI (Express + React) — `docs/10-dashboard.md`
-- [x] Aba de visualização ao vivo do viewport por worker
-- [x] Aba Indicadores (métricas ao vivo + agregados Postgres)
-- [x] Histórico Postgres (runs + logs + snapshots, volume Docker persistente)
-- [x] Ofuscação de visitas (stealth + humanize + doc crítica `11-ofuscacao.md` + cláusula pétrea #2)
-- [x] Timezone/locale automático pela região do IP (`src/core/geo.js` + `STEALTH_GEO_TZ`)
-- [x] Stealth sem quebrar JS do site (WebRTC suave; sem disable site-per-process)
-- [x] Aviso de reputação IP (`proxy`/`hosting`) + `PROXY_SKIP_FLAGGED` + doc "anonymous proxy detected"
-- [ ] Health-check de proxy (pular IP morto)
-- [ ] Rotação premium / residencial (quando houver orçamento)
+- [x] Script `npm test` smoke (stealth/config)
+- [ ] Lint (eslint)
+- [ ] Docker opcional p/ servers
+- [ ] Health-check de proxy
 - [ ] Novas strategies sob demanda
-- [ ] Commit (quando usuário pedir)
 
 ---
 
 ## Anti-padrões
 
 - Hardcodar secrets/URLs
-- Implementar proxy “de verdade” sem pedido
+- Misturar UA/IP/cookies de visitantes diferentes na mesma sessão
+- Fingir Firefox/UA móvel no Chromium
 - Monólitos copy-paste
 - Pastas fora da arquitetura documentada
 - Expor automação / IP real (regressão de ofuscação) — ver `docs/11-ofuscacao.md`

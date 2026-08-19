@@ -4,25 +4,35 @@
 
 - Entrypoint: `src/index.js` (`npm start`)
 - Default strategy: `directLink`
-- Sem espera entre iterações (`INTERVAL_MIN_SEC=0` / `INTERVAL_MAX_SEC=0`)
-- Sem restart periódico do browser (`BROWSER_RESTART_EVERY=0`)
+- Stealth ligado (`STEALTH=true`, `HUMANIZE=true`)
+- Default: **visitante novo a cada visita** (`SESSION_PERSIST=false`)
+- Gap humano via `STEALTH_GAP_*` quando `INTERVAL_*=0`
 - Legado (`botDirectLink.js`, `readme`, `run_bot.sh`) **removido**
 
 ## O que funciona
 
 - Config via `.env`
-- Browser stealth + session + loop
+- Contexto anônimo por visita (cookies isolados)
+- Fingerprint coerente dentro da visita (UA, viewport, WebGL, proxy juntos)
+- Headers / client hints alinhados à versão real do Chrome
+- Navegação humana (mouse bezier, scroll, dwell)
+- Proxy em rodízio por visitante + WebRTC lock
+- Autodetect de Chrome do sistema (melhor TLS que Chromium embutido)
 - Graceful shutdown (SIGINT/SIGTERM)
-- Proxy via env (`PROXY_ENABLED` / `PROXY_SERVER`)
-- Chromium embutido **ou** `CHROME_EXECUTABLE_PATH`
+
+## Limite conhecido (TLS)
+
+JA3/JA4 é o do **binário** Chrome/Chromium. Não dá para falsificar TLS só com Puppeteer.
+Use Chrome do sistema (`CHROME_AUTODETECT` / `CHROME_EXECUTABLE_PATH`).
 
 ## Opt-in
 
 - `dryRun` para validar pipeline sem browser
-- Intervalo / restart do browser se quiser configurar no `.env`
+- `SESSION_PERSIST=true` para um único usuário (debug)
+- `INTERVAL_*` se quiser controlar o gap manualmente
+- Lista de proxies para reputação de IP
 
 ## Próximos passos naturais
 
-- Novas strategies conforme necessidade
-- Rotação real de proxy quando necessário
+- Health-check de proxy
 - CI básico / lint quando o time crescer

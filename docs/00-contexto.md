@@ -11,11 +11,12 @@ Projeto pensado para **vários colaboradores** e execução em **vários disposi
 - puppeteer + puppeteer-extra + stealth
 - dotenv (config)
 - Sem DB / API / UI no v1
-- Proxies: interface pronta, ligada só se `PROXY_ENABLED=true`
+- Proxies: lista via env; rodízio por visitante (ou preso à sessão se `SESSION_PERSIST=true`)
+- Stealth: visitante novo a cada visita, headers, timing humano, fingerprint JS, Chrome real para TLS
 
 ## Default
 
-`STRATEGY=directLink` — visita `TARGET_URLS` em loop. Sem espera entre iterações (`INTERVAL_*=0`).
+`STRATEGY=directLink` — visita `TARGET_URLS` em loop, com stealth.
 
 `dryRun` permanece disponível como opt-in (`npm run start:dry`).
 
@@ -23,7 +24,7 @@ Projeto pensado para **vários colaboradores** e execução em **vários disposi
 
 | Strategy | Precisa de browser? |
 |----------|---------------------|
-| `directLink` (default) | **Sim** — Chromium do Puppeteer ou `CHROME_EXECUTABLE_PATH` |
+| `directLink` (default) | **Sim** — Chrome do sistema (preferível) ou Chromium do Puppeteer |
 | `dryRun` | **Não** |
 
 ```bash

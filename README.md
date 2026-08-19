@@ -18,8 +18,9 @@ Regra completa: [`docs/07-clausula-petrea.md`](docs/07-clausula-petrea.md).
 - Node.js **>= 18**
 - npm
 - **Browser é necessário** na strategy padrão (`directLink`)
-  - Chromium do Puppeteer (`npm run browsers:install`) **ou** `CHROME_EXECUTABLE_PATH`
-  - `dryRun` é opt-in e roda sem Chromium (só para validar pipeline)
+  - **Chrome do sistema** (melhor fingerprint TLS/HTTP) via autodetect ou `CHROME_EXECUTABLE_PATH`
+  - fallback: Chromium do Puppeteer (`npm run browsers:install`)
+  - `dryRun` é opt-in e roda sem Chromium
 
 ## Setup rápido (Docker — recomendado)
 
@@ -30,7 +31,7 @@ npm install
 npm start
 ```
 
-Default: `STRATEGY=directLink` — visita as URLs de `TARGET_URLS` em loop, sem espera entre iterações.
+Default: `STRATEGY=directLink` com stealth ligado. Cada visita é um **visitante novo** (contexto anônimo, cookies zerados, fingerprint coerente).
 
 Para só validar o pipeline, sem browser:
 
@@ -45,6 +46,28 @@ npm run start:dry
 | `npm start` | Sobe com a strategy do `.env` (`directLink` por padrão) |
 | `npm run start:dry` | Força dryRun (sem browser) |
 | `npm run start:headed` | Abre janela do browser (debug) |
+| `npm test` | Smoke das funções de stealth/config |
+
+## Stealth
+
+O browser é preparado para parecer uma sessão Chrome real:
+
+| Técnica | Onde |
+|---------|------|
+| User-Agent + headers / client hints | `src/core/stealth.js` + perfil |
+| Cookies isolados por visita | contexto anônimo (sem vazar sessão entre visitantes) |
+| Frequência irregular de requests | `STEALTH_GAP_*` / `INTERVAL_*` |
+| IP / WebRTC (não vazar IP real com proxy) | `PROXY_*` por visitante + flags WebRTC |
+| Navegação humana (mouse, scroll, dwell) | `src/core/human.js` |
+| JS (platform, WebGL, tela, hardware) | `evaluateOnNewDocument` |
+| Sinais de automação | puppeteer-extra-plugin-stealth + flags |
+| TLS/HTTP | Chrome real (`CHROME_AUTODETECT`) — JA3 segue o binário |
+
+Cada visita troca o **visitante inteiro** (fingerprint + cookies + proxy). O que não fazemos é misturar: UA novo com cookie velho, ou IP novo na mesma sessão.
+
+`SESSION_PERSIST=true` volta ao modo “um usuário só” (debug).
+
+Proxy residencial/móvel continua sendo o que mais pesa na reputação de IP. Sem proxy, o IP é o da máquina.
 
 ## Multi-dispositivo
 
@@ -52,30 +75,22 @@ npm run start:dry
 2. `cp .env.example .env` e ajuste (`TARGET_URLS` obrigatório em `directLink`)
 3. `npm install && npm start`
 
-### Usando a `directLink`
+Opcional — forçar browser do sistema:
 
 ```env
-STRATEGY=directLink
-TARGET_URLS=https://exemplo.com/smartlink
-INCLUDE_REFERRER=false
-INTERVAL_MIN_SEC=30
-INTERVAL_MAX_SEC=60
-```
-
-```bash
-npm run start:headed    # abre a janela p/ acompanhar (dev no host)
+CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome
 ```
 
 Fixture local opcional: `npm run test:server` + `TARGET_URLS=http://localhost:3000`.
 
 | Nome | Status |
 |------|--------|
-| `directLink` | **Default** — acessa `TARGET_URLS` e clica |
+| `directLink` | **Default** — acessa `TARGET_URLS` com stealth |
 | `dryRun` | Opt-in — valida pipeline sem smartlinks |
 
 Cada worker é um agente com perfil (`desktop` / `mobile` / `tablet`): viewport + UA + touch coerentes. Ver [`docs/01-arquitetura.md`](docs/01-arquitetura.md).
 
-Configuráveis via `PROXY_ENABLED` / `PROXY_SERVER`.
+`PROXY_ENABLED=true` e `PROXY_SERVER` / `PROXY_SERVERS` (lista). Sem persistência, a lista entra em rodízio a cada visitante.
 Ver `src/core/proxy.js`.
 
 ## Documentação
@@ -96,9 +111,9 @@ src/
   dashboard/        # API Express + botRuntime
   db/               # Postgres (histórico: runs, logs, snapshots)
   config/           # env → config
-  core/             # browser, session, loop, proxy
+  core/             # browser, session, loop, proxy, identity, stealth, human
   strategies/       # dryRun, directLink
-  data/             # UAs, referrers
+  data/             # perfis, UAs, referrers
   utils/            # logger, random, sleep
 web/                # React + Vite (dashboard UI)
 scripts/
