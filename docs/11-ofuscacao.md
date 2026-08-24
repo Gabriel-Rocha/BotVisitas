@@ -35,7 +35,7 @@ O projeto busca o **máximo razoável e sustentado** — não marketing de “in
 | Locale / TZ | `geo.js` + `applyLocaleHints` | Timezone/locale pela região do IP (proxy ou egress); fallback `.env` |
 | Headers | `buildRealisticHeaders` | Accept-Language + Client Hints alinhados ao UA e à região |
 | Personas | `device-profiles.json` | Só UAs Chromium coerentes (sem Firefox/Safari falso) |
-| Comportamento | `humanBrowsePause`, `navigateLikeHuman` | Scroll suave, mouse, dwell, clique em `<a>` |
+| Comportamento | `humanBrowsePause`, `humanEngage`, `navigateLikeHuman` | Scroll, mouse, dwell, **cliques reais** (CTR), follow redirect JS |
 
 Módulos: [`src/core/stealth.js`](../src/core/stealth.js) · [`src/core/geo.js`](../src/core/geo.js).
 

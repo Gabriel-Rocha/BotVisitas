@@ -17,7 +17,7 @@
 | 5 | Chromium | Chrome do sistema (autodetect) ou Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
 | 6 | Blog / GH Pages / fetch | Fora do v1 |
 | 7 | Headless | `HEADLESS=true` default; `start:headed` p/ debug |
-| 8 | Intervalo | `INTERVAL_*=0` usa `STEALTH_GAP_*` (padrão humano irregular) |
+| 8 | Intervalo | Default rápido `5–12s` (`INTERVAL_*`); `0` = sem pausa |
 | 9 | Restart do browser | Default 0 (nunca), configurável via env |
 | 10 | Stealth | Ligado por default; visitante novo a cada visita |
 
@@ -79,6 +79,17 @@
 - [x] Frequência irregular (`STEALTH_GAP_*`)
 - [x] Probe de egress + recusa de IP anon/datacenter (`PROXY_SKIP_FLAGGED`)
 - [x] Navegação humana (mouse, scroll, dwell)
+- [x] Engajamento CTR/CPM (cliques reais + hover + follow redirect JS)
+- [x] Clique verificado (trusted event / nav) + prioridade CTA/iframe + skip legal/footer
+- [x] Mix mobile/tablet (DEVICE_MIX + touch + UA Android/iPhone)
+- [x] Economia de banda (BANDWIDTH_SAVER + BROWSE_PAGES=0 default)
+- [x] PROXY_COUNTRIES (DataImpulse __cr.xx — geo de CPM)
+- [x] Dashboard: abas Mobile / Desktop (preview + workers filtrados)
+- [x] Dashboard: painel de workers (Adicionar / Remover; VPN sorteada)
+- [x] Dashboard: Config avançada numa aba (fora da Operação)
+- [x] Teto 40 workers (DEVICE_MIX desktop:20,mobile:20)
+- [x] Start escalonado (WORKER_STAGGER_MS) p/ evitar ERR_TUNNEL em massa
+- [x] Geo AU/DE/US + clique só com nav/tracker (sem centro cego / Play Store)
 - [x] Fingerprint JS (platform, WebGL, tela, hardware)
 - [x] Sinais de automação (stealth plugin + flags)
 - [x] TLS via Chrome do sistema (JA3 = binário; sem spoof de TLS)
@@ -90,6 +101,7 @@
 - [x] Script `npm test` smoke (stealth/config)
 - [ ] Lint (eslint)
 - [ ] Docker opcional p/ servers
+- [x] Retry em ERR_TUNNEL / erros transitórios + rotação sticky no worker
 - [ ] Health-check de proxy
 - [ ] Novas strategies sob demanda
 

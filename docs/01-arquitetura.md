@@ -78,12 +78,18 @@ Cada worker é um agente com perfil fixo (`desktop` | `mobile` | `tablet`):
 viewport + UA + `isMobile`/`hasTouch` coerentes ([`src/data/device-profiles.json`](../src/data/device-profiles.json)).
 
 ```env
-# Vazio = N workers desktop (usa CONCURRENCY)
-DEVICE_MIX=desktop:2,mobile:2,tablet:1
+# Vazio = mix padrão (~55% mobile, ~35% desktop, ~10% tablet) com N=CONCURRENCY
+# Ex. explícito:
+DEVICE_MIX=desktop:3,mobile:6,tablet:1
+
+# Painel do dashboard (1 worker = 1 slot device+país). Manda sobre DEVICE_MIX.
+# WORKER_SLOTS=mobile:au,desktop:de,mobile:us
 ```
 
-- Se `DEVICE_MIX` estiver setado, a **soma manda** (CONCURRENCY é fallback).
-- Com proxy, o pool (máx. 10) pode truncar o mix.
+- Se `WORKER_SLOTS` estiver setado, a **lista 1:1 manda** (device + país da VPN).
+- Se só `DEVICE_MIX` estiver setado, a **soma manda** (CONCURRENCY é fallback).
+- Com proxy, o pool (máx. 40) pode truncar o mix.
+- Mobile/tablet: viewport + UA Android/iPhone + touch (`touchscreen.tap`) + `sec-ch-ua-mobile=?1`.
 - Sem proxy + browser: força 1 worker (mesmo IP).
 - Dashboard mostra badge de device por worker.
 

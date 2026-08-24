@@ -16,6 +16,7 @@ Documentação enxuta para reduzir tokens e manter coerência na refatoração.
 10. [09-proxies-webshare.md](./09-proxies-webshare.md) ← plano free Webshare (máx. 10)
 11. [10-dashboard.md](./10-dashboard.md) ← painel web de operação
 12. **[11-ofuscacao.md](./11-ofuscacao.md)** ← 🔒 requisito crítico: visita humana / anti-detecção
+13. [12-bandwidth.md](./12-bandwidth.md) ← economia de banda do proxy
 
 ## Regra
 

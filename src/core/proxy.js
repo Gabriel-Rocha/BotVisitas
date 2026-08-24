@@ -1,9 +1,7 @@
 'use strict';
 
 /**
- * Proxies — pensado para o plano free Webshare (máx. 10).
- * https://www.webshare.io/pricing
- *
+ * Proxies — lista (Webshare etc.) ou gateway (DataImpulse).
  * Formatos aceitos por entrada:
  *   http://user:pass@host:port
  *   host:port:user:pass          (export típico Webshare)
@@ -13,7 +11,8 @@
  * Workers: acquire/release exclusivo (1 proxy = 1 browser por vez).
  */
 
-const FREE_PLAN_MAX = 10;
+/** Teto absoluto de workers/proxies paralelos (RAM + sticky ports). */
+const FREE_PLAN_MAX = 40;
 
 function stripQuotes(s) {
   return String(s || '').trim().replace(/^['"]|['"]$/g, '');
@@ -84,24 +83,73 @@ function parseProxyList(raw) {
     .filter(Boolean);
 }
 
+function parseCountryList(raw) {
+  if (!raw || !String(raw).trim()) return [];
+  return String(raw)
+    .split(/[\s,;]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => /^[a-z]{2}$/.test(s));
+}
+
+/**
+ * DataImpulse: país no username → login__cr.us
+ * Não duplica se já houver __cr.xx no login.
+ */
+function withCountryTarget(username, countryCode) {
+  if (!username || !countryCode) return username;
+  const cc = String(countryCode).toLowerCase();
+  if (/__cr\.[a-z]{2}/i.test(username)) return username;
+  return `${username}__cr.${cc}`;
+}
+
 function buildProxyPool(proxyConfig) {
   const max = Math.min(
     Math.max(1, proxyConfig.maxProxies || FREE_PLAN_MAX),
     FREE_PLAN_MAX
   );
 
+  const countries = parseCountryList(proxyConfig.countries || '');
+
   let pool = [];
   if (proxyConfig.list?.length) {
-    pool = [...proxyConfig.list];
+    pool = proxyConfig.list.map((entry, i) => {
+      const clone = { ...entry };
+      if (countries.length && clone.username) {
+        const cc = countries[i % countries.length];
+        clone.username = withCountryTarget(clone.username, cc);
+        clone.country = cc;
+        clone.label = `${clone.label || `${clone.host}:${clone.port}`}|${cc}`;
+      }
+      return clone;
+    });
   } else if (proxyConfig.server) {
-    pool = [parseProxyEntry(proxyConfig.server)];
+    // Gateway rotativo (DataImpulse, Zyte, etc.): N slots = até PROXY_MAX workers.
+    const entry = parseProxyEntry(proxyConfig.server);
+    const stickyBase =
+      /dataimpulse\.com$/i.test(entry.host) && Number(entry.port) === 823
+        ? 10000 // DataImpulse sticky 10000–20000 (evita 2 workers no mesmo IP rotativo)
+        : null;
+    pool = Array.from({ length: max }, (_, i) => {
+      const clone = { ...entry };
+      if (stickyBase != null) {
+        clone.port = String(stickyBase + i);
+        clone.label = `${clone.host}:${clone.port}`;
+      }
+      if (countries.length && clone.username) {
+        const cc = countries[i % countries.length];
+        clone.username = withCountryTarget(clone.username, cc);
+        clone.country = cc;
+        clone.label = `${clone.label}|${cc}`;
+      }
+      return clone;
+    });
   }
 
   if (pool.length > max) {
     pool = pool.slice(0, max);
   }
 
-  return { pool, max };
+  return { pool, max, countries };
 }
 
 /**
@@ -116,11 +164,19 @@ function createProxyLease(pool) {
     availableCount() {
       return available.length;
     },
-    acquire() {
+    acquire(preferredCountry) {
       if (!available.length) {
         throw new Error('Nenhuma proxy livre no pool (todas em uso)');
       }
-      const proxy = available.shift();
+      const want = String(preferredCountry || '').toLowerCase();
+      let index = 0;
+      if (want) {
+        const found = available.findIndex(
+          (item) => String(item.country || '').toLowerCase() === want
+        );
+        if (found >= 0) index = found;
+      }
+      const proxy = available.splice(index, 1)[0];
       leased.add(proxy);
       return proxy;
     },
@@ -134,7 +190,14 @@ function createProxyLease(pool) {
 
 function getProxyLaunchArgs(selected) {
   if (!selected) return [];
-  return [`--proxy-server=${selected.protocol}://${selected.host}:${selected.port}`];
+  // Chromium: preferir host:port (sem scheme). DataImpulse e vários guias
+  // recomendam isso; `https://` no proxy causa ERR_SSL_PROTOCOL_ERROR.
+  // `http://host:port` também funciona na maioria dos casos, mas host:port é o mais seguro.
+  const args = [`--proxy-server=${selected.host}:${selected.port}`];
+  if (/dataimpulse\.com$/i.test(selected.host)) {
+    args.push('--disable-quic');
+  }
+  return args;
 }
 
 async function applyProxyAuth(page, selected) {
@@ -151,7 +214,7 @@ function assertProxyReady(proxyConfig, logger) {
     return;
   }
 
-  const { pool, max } = buildProxyPool(proxyConfig);
+  const { pool, max, countries } = buildProxyPool(proxyConfig);
   if (!pool.length) {
     throw new Error(
       'PROXY_ENABLED=true mas nenhuma proxy configurada (PROXY_LIST ou PROXY_SERVER)'
@@ -160,12 +223,13 @@ function assertProxyReady(proxyConfig, logger) {
 
   if ((proxyConfig.list?.length || 0) > FREE_PLAN_MAX) {
     logger.warn(
-      `PROXY_LIST tem mais de ${FREE_PLAN_MAX} entradas — plano free Webshare: usando só as ${max} primeiras.`
+      `PROXY_LIST tem mais de ${FREE_PLAN_MAX} entradas — usando só as ${max} primeiras (teto do pool).`
     );
   }
 
+  const geoLabel = countries?.length ? ` | countries=${countries.join(',')}` : '';
   logger.info(
-    `Proxy ON | pool=${pool.length}/${max} | lease=exclusive | provider=webshare-free-cap`
+    `Proxy ON | pool=${pool.length}/${max} | lease=exclusive | host=${pool[0]?.host || '?'}${geoLabel}`
   );
 }
 
@@ -173,6 +237,8 @@ module.exports = {
   FREE_PLAN_MAX,
   parseProxyEntry,
   parseProxyList,
+  parseCountryList,
+  withCountryTarget,
   buildProxyPool,
   createProxyLease,
   getProxyLaunchArgs,

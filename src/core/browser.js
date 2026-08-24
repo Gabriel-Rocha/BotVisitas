@@ -54,6 +54,8 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     args,
     ignoreDefaultArgs: ['--enable-automation'],
     defaultViewport: null,
+    // Necessário com vários proxies HTTP (CONNECT / cert / handshake).
+    ignoreHTTPSErrors: true,
   };
 
   const chromePath = resolveChromePath(config.chromeExecutablePath);

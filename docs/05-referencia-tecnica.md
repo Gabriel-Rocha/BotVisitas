@@ -196,11 +196,13 @@ Copie `.env.example` para `.env`. **Nunca** commite o `.env`.
 | `CHROME_EXECUTABLE_PATH` | *(vazio)* | path | Browser do sistema; vazio = Chromium do Puppeteer |
 | `NAVIGATION_TIMEOUT_MS` | `60000` | int | Timeout de navegação (ms) |
 | `DEFAULT_TIMEOUT_MS` | `30000` | int | Timeout padrão de ações (ms) |
-| `INTERVAL_MIN_SEC` | `60` | int | Mínimo de espera entre iterações (s) |
-| `INTERVAL_MAX_SEC` | `900` | int | Máximo de espera entre iterações (s) |
+| `INTERVAL_MIN_SEC` | `5` | int | Mínimo de espera entre iterações (s) |
+| `INTERVAL_MAX_SEC` | `12` | int | Máximo de espera entre iterações (s) |
 | `BROWSER_RESTART_EVERY` | `20` | int | Reinicia o browser a cada N iterações (`0` = nunca) |
-| `CONCURRENCY` | `5` | int | Workers se `DEVICE_MIX` vazio |
-| `DEVICE_MIX` | *(vazio)* | CSV | Ex.: `desktop:2,mobile:2` — soma manda; vazio = todos desktop |
+| `CONCURRENCY` | `5` | int | Workers se `DEVICE_MIX`/`WORKER_SLOTS` vazios |
+| `DEVICE_MIX` | *(vazio)* | CSV | Ex.: `desktop:3,mobile:6,tablet:1` — soma manda; vazio = mix padrão mobile-heavy |
+| `WORKER_SLOTS` | *(vazio)* | CSV | Ex.: `mobile:au,desktop:de` — 1:1 device+país; manda sobre `DEVICE_MIX` |
+| `PROXY_COUNTRIES` | *(vazio)* | CSV | ISO-2 em ciclo se `WORKER_SLOTS` não definir país por worker |
 | `VIEWPORT_WIDTH` | `1920` | int | Fallback de largura (preferir perfis de device) |
 | `VIEWPORT_HEIGHT` | `1080` | int | Fallback de altura (preferir perfis de device) |
 | `TARGET_URLS` | *(vazio)* | CSV | URLs de entrada (`directLink`); smartlinks ou qualquer host |

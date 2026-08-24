@@ -9,8 +9,10 @@ import {
   setDashboardToken,
 } from './api.js';
 import CapturesPanel from './CapturesPanel.jsx';
+import ConfigPanel from './ConfigPanel.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
 import MetricsPanel from './MetricsPanel.jsx';
+import WorkersMixer from './WorkersMixer.jsx';
 
 const emptyMetrics = {
   ok: 0,
@@ -37,13 +39,21 @@ export default function App() {
   const [tokenInput, setTokenInput] = useState(getDashboardToken());
   const [historyKey, setHistoryKey] = useState(0);
   const [activeTab, setActiveTab] = useState('operation');
-  const logEnd = useRef(null);
+  const [followLogs, setFollowLogs] = useState(false);
+  const logsBox = useRef(null);
+  const pageScrollY = useRef(0);
+  const configRef = useRef(null);
+  const configDirtyRef = useRef(false);
+  configRef.current = config;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ includeConfig = true } = {}) => {
     try {
-      const [s, c] = await Promise.all([fetchStatus(), fetchConfig()]);
+      const s = await fetchStatus();
       setStatus(s);
-      setConfig(c);
+      if (includeConfig && !configDirtyRef.current) {
+        const c = await fetchConfig();
+        setConfig(c);
+      }
       setError('');
     } catch (err) {
       setError(err.message);
@@ -52,7 +62,7 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 2000);
+    const id = setInterval(() => refresh({ includeConfig: false }), 2000);
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -63,9 +73,34 @@ export default function App() {
     return close;
   }, []);
 
+  // Congela a posição da página: refresh de status/logs não pode puxar o viewport.
   useEffect(() => {
-    logEnd.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+    const onScroll = () => {
+      pageScrollY.current = window.scrollY;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    const y = pageScrollY.current;
+    const restore = () => {
+      if (Math.abs(window.scrollY - y) > 2) {
+        window.scrollTo(0, y);
+      }
+    };
+    restore();
+    const id = requestAnimationFrame(restore);
+    return () => cancelAnimationFrame(id);
+  }, [status, logs, config, historyKey]);
+
+  // Auto-seguir logs: DESLIGADO por padrão. Só rola a caixa interna, nunca a página.
+  useEffect(() => {
+    if (!followLogs) return;
+    const box = logsBox.current;
+    if (!box) return;
+    box.scrollTop = box.scrollHeight;
+  }, [logs, followLogs]);
 
   async function onAction(action) {
     setBusy(true);
@@ -87,26 +122,34 @@ export default function App() {
     }
   }
 
-  async function onSaveConfig(e) {
-    e.preventDefault();
-    if (!config) return;
+  function buildConfigBody(source) {
+    return {
+      STRATEGY: source.STRATEGY,
+      CONCURRENCY: source.CONCURRENCY,
+      DEVICE_MIX: source.DEVICE_MIX,
+      WORKER_SLOTS: source.WORKER_SLOTS || '',
+      PROXY_MAX: source.PROXY_MAX,
+      PROXY_COUNTRIES: source.PROXY_COUNTRIES || '',
+      INTERVAL_MIN_SEC: source.INTERVAL_MIN_SEC,
+      INTERVAL_MAX_SEC: source.INTERVAL_MAX_SEC,
+      BROWSER_RESTART_EVERY: source.BROWSER_RESTART_EVERY,
+      HEADLESS: source.HEADLESS,
+      PROXY_ENABLED: source.PROXY_ENABLED,
+      BROWSE_PAGES_MIN: source.BROWSE_PAGES_MIN,
+      BROWSE_PAGES_MAX: source.BROWSE_PAGES_MAX,
+      INCLUDE_REFERRER: source.INCLUDE_REFERRER,
+      BANDWIDTH_SAVER: source.BANDWIDTH_SAVER,
+    };
+  }
+
+  async function persistConfig(patch = {}) {
+    const source = { ...(configRef.current || {}), ...patch };
+    if (!source.STRATEGY) return;
     setBusy(true);
     setError('');
     try {
-      const body = {
-        STRATEGY: config.STRATEGY,
-        CONCURRENCY: config.CONCURRENCY,
-        DEVICE_MIX: config.DEVICE_MIX,
-        INTERVAL_MIN_SEC: config.INTERVAL_MIN_SEC,
-        INTERVAL_MAX_SEC: config.INTERVAL_MAX_SEC,
-        BROWSER_RESTART_EVERY: config.BROWSER_RESTART_EVERY,
-        HEADLESS: config.HEADLESS,
-        PROXY_ENABLED: config.PROXY_ENABLED,
-        BROWSE_PAGES_MIN: config.BROWSE_PAGES_MIN,
-        BROWSE_PAGES_MAX: config.BROWSE_PAGES_MAX,
-        INCLUDE_REFERRER: config.INCLUDE_REFERRER,
-      };
-      const result = await saveConfig(body);
+      const result = await saveConfig(buildConfigBody(source));
+      configDirtyRef.current = false;
       setConfig(result.config);
     } catch (err) {
       setError(err.message);
@@ -115,8 +158,19 @@ export default function App() {
     }
   }
 
+  async function onSaveConfig(e) {
+    e.preventDefault();
+    await persistConfig();
+  }
+
   function updateField(key, value) {
+    configDirtyRef.current = true;
     setConfig((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateFields(patch) {
+    configDirtyRef.current = true;
+    setConfig((prev) => ({ ...prev, ...patch }));
   }
 
   const stats = status.stats || emptyMetrics;
@@ -154,12 +208,28 @@ export default function App() {
         </button>
         <button
           type="button"
-          className={activeTab === 'preview' ? 'active' : ''}
-          onClick={() => setActiveTab('preview')}
+          className={activeTab === 'config' ? 'active' : ''}
+          onClick={() => setActiveTab('config')}
         >
-          Visualização
+          Config
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'preview-mobile' ? 'active' : ''}
+          onClick={() => setActiveTab('preview-mobile')}
+        >
+          Mobile
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'preview-desktop' ? 'active' : ''}
+          onClick={() => setActiveTab('preview-desktop')}
+        >
+          Desktop
         </button>
       </nav>
+
+      {error ? <div className="error-banner">{error}</div> : null}
 
       {activeTab === 'operation' ? (
         <>
@@ -209,8 +279,6 @@ export default function App() {
         </button>
       </div>
 
-      {error ? <div className="error-banner">{error}</div> : null}
-
       <div className="grid">
         <div className="metric">
           <div className="label">OK</div>
@@ -231,39 +299,18 @@ export default function App() {
       </div>
 
       <div className="panels">
-        <section className="panel">
-          <h2>Workers</h2>
-          {stats.workers?.length ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Device</th>
-                  <th>Proxy</th>
-                  <th>OK</th>
-                  <th>Err</th>
-                  <th>Iter</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.workers.map((w) => (
-                  <tr key={w.workerId}>
-                    <td>w{w.workerId}</td>
-                    <td>
-                      <span className={`device-badge device-${w.deviceType || 'desktop'}`}>
-                        {w.deviceType || 'desktop'}
-                      </span>
-                    </td>
-                    <td>{w.proxyLabel || '—'}</td>
-                    <td>{w.ok}</td>
-                    <td>{w.errors}</td>
-                    <td>{w.iterations}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <section className="panel full">
+          {config ? (
+            <WorkersMixer
+              config={config}
+              onChange={updateFields}
+              onPersist={persistConfig}
+              liveWorkers={stats.workers || []}
+              running={running}
+              busy={busy}
+            />
           ) : (
-            <p className="muted">Nenhum worker ativo. Inicie o bot.</p>
+            <p className="muted">Carregando workers…</p>
           )}
           <p className="muted" style={{ marginTop: '0.75rem' }}>
             strategy={status.strategy} · concurrency={status.concurrency} · proxy=
@@ -277,127 +324,24 @@ export default function App() {
           </p>
         </section>
 
-        <section className="panel">
-          <h2>Config (segura)</h2>
-          {config ? (
-            <form className="form" onSubmit={onSaveConfig}>
-              <div className="field">
-                <label>STRATEGY</label>
-                <select
-                  value={config.STRATEGY}
-                  onChange={(e) => updateField('STRATEGY', e.target.value)}
-                >
-                  <option value="dryRun">dryRun</option>
-                  <option value="directLink">directLink</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>CONCURRENCY</label>
-                <input
-                  value={config.CONCURRENCY}
-                  onChange={(e) => updateField('CONCURRENCY', e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>DEVICE_MIX</label>
-                <input
-                  value={config.DEVICE_MIX || ''}
-                  onChange={(e) => updateField('DEVICE_MIX', e.target.value)}
-                  placeholder="desktop:2,mobile:2,tablet:1"
-                />
-                <p className="muted">
-                  Vazio = todos desktop (usa CONCURRENCY). Com mix, a soma manda.
-                </p>
-              </div>
-              <div className="field">
-                <label>INTERVAL_MIN_SEC</label>
-                <input
-                  value={config.INTERVAL_MIN_SEC}
-                  onChange={(e) => updateField('INTERVAL_MIN_SEC', e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>INTERVAL_MAX_SEC</label>
-                <input
-                  value={config.INTERVAL_MAX_SEC}
-                  onChange={(e) => updateField('INTERVAL_MAX_SEC', e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>BROWSER_RESTART_EVERY</label>
-                <input
-                  value={config.BROWSER_RESTART_EVERY}
-                  onChange={(e) =>
-                    updateField('BROWSER_RESTART_EVERY', e.target.value)
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>HEADLESS</label>
-                <select
-                  value={config.HEADLESS}
-                  onChange={(e) => updateField('HEADLESS', e.target.value)}
-                >
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>PROXY_ENABLED</label>
-                <select
-                  value={config.PROXY_ENABLED}
-                  onChange={(e) => updateField('PROXY_ENABLED', e.target.value)}
-                >
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>BROWSE_PAGES_MIN</label>
-                <input
-                  value={config.BROWSE_PAGES_MIN || '1'}
-                  onChange={(e) => updateField('BROWSE_PAGES_MIN', e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>BROWSE_PAGES_MAX</label>
-                <input
-                  value={config.BROWSE_PAGES_MAX || '3'}
-                  onChange={(e) => updateField('BROWSE_PAGES_MAX', e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>INCLUDE_REFERRER</label>
-                <select
-                  value={config.INCLUDE_REFERRER}
-                  onChange={(e) => updateField('INCLUDE_REFERRER', e.target.value)}
-                >
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </div>
-              <p className="muted">{config.PROXY_LIST_MASKED}</p>
-              <button type="submit" className="primary" disabled={busy}>
-                Salvar no .env
-              </button>
-              <p className="muted">
-                Alterações de config aplicam no próximo Start/Restart.
-              </p>
-            </form>
-          ) : (
-            <p className="muted">Carregando config…</p>
-          )}
-        </section>
-
         <section className="panel full">
-          <h2>Logs</h2>
-          <div className="logs">
+          <div className="logs-header">
+            <h2>Logs</h2>
+            <label className="follow-logs">
+              <input
+                type="checkbox"
+                checked={followLogs}
+                onChange={(e) => setFollowLogs(e.target.checked)}
+              />
+              Seguir novos logs
+            </label>
+          </div>
+          <div className="logs" ref={logsBox}>
             {logs.map((line, i) => (
               <div key={`${line.ts}-${i}`} className={`line level-${line.level}`}>
                 [{line.ts}] [{line.level}] {line.message}
               </div>
             ))}
-            <div ref={logEnd} />
           </div>
           <div className="token-row">
             <input
@@ -428,7 +372,22 @@ export default function App() {
 
       {activeTab === 'metrics' ? <MetricsPanel status={status} /> : null}
 
-      {activeTab === 'preview' ? <CapturesPanel status={status} /> : null}
+      {activeTab === 'config' ? (
+        <ConfigPanel
+          config={config}
+          busy={busy}
+          onChange={updateField}
+          onSave={onSaveConfig}
+        />
+      ) : null}
+
+      {activeTab === 'preview-mobile' ? (
+        <CapturesPanel status={status} deviceFilter="mobile" />
+      ) : null}
+
+      {activeTab === 'preview-desktop' ? (
+        <CapturesPanel status={status} deviceFilter="desktop" />
+      ) : null}
     </div>
   );
 }

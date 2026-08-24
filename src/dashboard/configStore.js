@@ -10,6 +10,9 @@ const EDITABLE_KEYS = [
   'STRATEGY',
   'CONCURRENCY',
   'DEVICE_MIX',
+  'WORKER_SLOTS',
+  'PROXY_MAX',
+  'PROXY_COUNTRIES',
   'INTERVAL_MIN_SEC',
   'INTERVAL_MAX_SEC',
   'BROWSER_RESTART_EVERY',
@@ -19,6 +22,7 @@ const EDITABLE_KEYS = [
   'BROWSE_PAGES_MIN',
   'BROWSE_PAGES_MAX',
   'INCLUDE_REFERRER',
+  'BANDWIDTH_SAVER',
 ];
 
 function readEnvFile() {
@@ -50,15 +54,19 @@ function getSafeConfig() {
     STRATEGY: get('STRATEGY', 'dryRun'),
     CONCURRENCY: get('CONCURRENCY', '5'),
     DEVICE_MIX: get('DEVICE_MIX', ''),
-    INTERVAL_MIN_SEC: get('INTERVAL_MIN_SEC', '60'),
-    INTERVAL_MAX_SEC: get('INTERVAL_MAX_SEC', '900'),
+    WORKER_SLOTS: get('WORKER_SLOTS', ''),
+    PROXY_MAX: get('PROXY_MAX', '10'),
+    PROXY_COUNTRIES: get('PROXY_COUNTRIES', ''),
+    INTERVAL_MIN_SEC: get('INTERVAL_MIN_SEC', '5'),
+    INTERVAL_MAX_SEC: get('INTERVAL_MAX_SEC', '12'),
     BROWSER_RESTART_EVERY: get('BROWSER_RESTART_EVERY', '20'),
     HEADLESS: get('HEADLESS', 'true'),
     PROXY_ENABLED: get('PROXY_ENABLED', 'false'),
     TARGET_URLS: get('TARGET_URLS', ''),
-    BROWSE_PAGES_MIN: get('BROWSE_PAGES_MIN', '1'),
-    BROWSE_PAGES_MAX: get('BROWSE_PAGES_MAX', '3'),
-    INCLUDE_REFERRER: get('INCLUDE_REFERRER', 'true'),
+    BROWSE_PAGES_MIN: get('BROWSE_PAGES_MIN', '0'),
+    BROWSE_PAGES_MAX: get('BROWSE_PAGES_MAX', '0'),
+    INCLUDE_REFERRER: get('INCLUDE_REFERRER', 'false'),
+    BANDWIDTH_SAVER: get('BANDWIDTH_SAVER', 'light'),
     PROXY_LIST_MASKED: proxyCount
       ? `${proxyCount} proxies configurados (ocultos)`
       : '(vazio)',

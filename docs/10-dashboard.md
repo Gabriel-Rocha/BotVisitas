@@ -1,7 +1,8 @@
 # Dashboard UI — BotVisitas
 
-Painel de operação: monitorar workers, start/stop, config segura, logs ao vivo,
+Painel de operação: monitorar workers, start/stop, logs ao vivo,
 **visualização da página aberta** e histórico persistente (Postgres).
+Config avançada fica na aba **Config** (fora da tela principal).
 
 ## Subir (local)
 
@@ -58,7 +59,9 @@ Sem token: API aberta no bind configurado (local default `127.0.0.1`).
 | GET | `/api/runs/:id/logs` | logs do run (`limit`, `before`, `level`) |
 | GET | `/api/runs/:id/snapshots` | timeline de métricas |
 
-Config editável: STRATEGY, CONCURRENCY, DEVICE_MIX, intervalos, HEADLESS, PROXY_ENABLED, BROWSE_PAGES_MIN/MAX, INCLUDE_REFERRER.
+Config editável: STRATEGY, workers (Adicionar/Remover → WORKER_SLOTS +
+DEVICE_MIX + CONCURRENCY + PROXY_MAX + PROXY_COUNTRIES; VPN sorteada), BANDWIDTH_SAVER, intervalos, HEADLESS, PROXY_ENABLED,
+BROWSE_PAGES_MIN/MAX, INCLUDE_REFERRER.
 
 Links de destino preferencialmente colados no painel (runtime, não gravam no `.env`).
 Não editável na UI: PROXY_LIST / PROXY_SERVER / credenciais do banco.
@@ -67,9 +70,13 @@ Alterações de config valem no próximo Start/Restart.
 
 ## Visualização
 
-A aba **Visualização** captura o viewport atual de cada worker com browser e atualiza
-a imagem a cada 5 segundos enquanto estiver aberta. A URL, o título e o horário da
-captura aparecem junto da imagem.
+Abas **Mobile** e **Desktop** (separadas): cada uma captura só os workers daquele
+device (JPEG a cada 5s). No painel de Workers: **Adicionar** / **Remover**.
+VPN (país) é sorteada; device equilibra mobile/desktop. URL, título e horário
+aparecem junto da imagem nas abas de preview.
+
+Com “proxy detected” no desktop, prefira mais Mobile (o add já equilibra) para
+não gastar banda nesses workers.
 
 As capturas são entregues diretamente da memória, protegidas pelo mesmo
 `DASHBOARD_TOKEN` da API. Elas não são gravadas em disco nem nos snapshots do

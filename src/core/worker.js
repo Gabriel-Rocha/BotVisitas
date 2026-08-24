@@ -5,6 +5,7 @@ const { createSession, recreateSession } = require('./session');
 const { resolveSessionLocale, isFlaggedAnonymousIp } = require('./geo');
 const { randomInt } = require('../utils/random');
 const { sleep } = require('../utils/sleep');
+const { isTransientProxyError } = require('../utils/netErrors');
 
 /**
  * Um worker = 1 Chromium (+ 1 proxy exclusivo se houver lease) + 1 perfil de device.
@@ -17,6 +18,7 @@ function createWorker({
   proxyLease = null,
   deviceType = 'desktop',
   deviceProfile = null,
+  preferredCountry = null,
 }) {
   const needsBrowser = strategy.requiresBrowser !== false;
   const prefix = `[w${workerId}]`;
@@ -49,7 +51,7 @@ function createWorker({
 
   async function acquireProxy() {
     if (!proxyLease) return null;
-    const proxy = proxyLease.acquire();
+    const proxy = proxyLease.acquire(preferredCountry);
     stats.proxyLabel = proxy.label;
     log('info', `Proxy adquirido: ${proxy.label}`);
     return proxy;
@@ -77,6 +79,18 @@ function createWorker({
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       activeProxy = await acquireProxy();
       lastHints = await resolveLocaleForProxy(activeProxy);
+
+      const wanted = String(activeProxy.country || '').toUpperCase();
+      const got = String(lastHints.countryCode || '').toUpperCase();
+      if (wanted && got && wanted !== got) {
+        log(
+          'warn',
+          `Geo mismatch: sticky ${wanted} saiu ${got} (${activeProxy.label}) — trocando`
+        );
+        releaseProxy();
+        await sleep(200);
+        continue;
+      }
 
       if (!skipFlagged || !isFlaggedAnonymousIp(lastHints)) {
         return { proxy: activeProxy, hints: lastHints };
@@ -228,19 +242,34 @@ function createWorker({
         log('debug', err.stack);
 
         if (needsBrowser) {
+          const rotateProxy = Boolean(proxyLease) && isTransientProxyError(err);
           try {
-            page = await recreateSession(
-              browser,
-              page,
-              config,
-              {
+            if (rotateProxy) {
+              log('warn', 'Erro de túnel/proxy — trocando sticky e reiniciando browser');
+              await closeBrowser(browser, {
                 info: (...a) => log('info', ...a),
-                debug: (...a) => log('debug', ...a),
-              },
-              activeProxy,
-              device,
-              sessionLocale
-            );
+                warn: (...a) => log('warn', ...a),
+              });
+              browser = null;
+              page = null;
+              sessionLocale = null;
+              releaseProxy();
+              await acquireUsableProxy();
+              await ensureBrowser();
+            } else {
+              page = await recreateSession(
+                browser,
+                page,
+                config,
+                {
+                  info: (...a) => log('info', ...a),
+                  debug: (...a) => log('debug', ...a),
+                },
+                activeProxy,
+                device,
+                sessionLocale
+              );
+            }
           } catch {
             await closeBrowser(browser, {
               info: (...a) => log('info', ...a),

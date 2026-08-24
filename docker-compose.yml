@@ -63,7 +63,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env
-    shm_size: "2gb"
+    shm_size: "12gb"
     init: true
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -135,6 +135,8 @@ async function start(options = {}) {
         STRATEGY: safe.STRATEGY,
         CONCURRENCY: safe.CONCURRENCY,
         DEVICE_MIX: safe.DEVICE_MIX,
+        WORKER_SLOTS: safe.WORKER_SLOTS,
+        PROXY_COUNTRIES: safe.PROXY_COUNTRIES,
         INTERVAL_MIN_SEC: safe.INTERVAL_MIN_SEC,
         INTERVAL_MAX_SEC: safe.INTERVAL_MAX_SEC,
         BROWSER_RESTART_EVERY: safe.BROWSER_RESTART_EVERY,

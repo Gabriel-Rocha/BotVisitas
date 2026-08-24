@@ -2,17 +2,41 @@
 
 const { pick, randomInt } = require('../utils/random');
 const { sleep } = require('../utils/sleep');
-const { humanBrowsePause, navigateLikeHuman } = require('../core/stealth');
+const { isTransientProxyError } = require('../utils/netErrors');
+const { isHeavyOfferHost } = require('../core/bandwidth');
+const {
+  humanBrowsePause,
+  humanEngage,
+  followClientRedirects,
+  navigateLikeHuman,
+} = require('../core/stealth');
+
+async function gotoWithRetry(page, url, logger, { attempts = 3 } = {}) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i += 1) {
+    try {
+      return await page.goto(url, { waitUntil: 'domcontentloaded' });
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientProxyError(err) || i === attempts) throw err;
+      const brief = String(err.message || err).split('\n')[0];
+      logger.warn(`Nav falhou (${brief}) — retry ${i}/${attempts - 1}`);
+      await sleep(900 * i + randomInt(200, 900));
+    }
+  }
+  throw lastErr;
+}
 
 /**
- * Direct link — visita TARGET_URLS e navega pelo site (mesmo host).
- * Comportamento humanizado (ofuscação): scroll suave, mouse, dwell, clique em links.
- * Sem clique forçado em CTA.
+ * Direct link — visita TARGET_URLS com engajamento de visitante comum
+ * (scroll, hover, cliques reais) para sinais de CTR/CPM.
  */
 
-async function waitSettled(page) {
+async function waitSettled(page, config) {
+  // Com bandwidth saver, networkIdle demora menos; timeout curto evita gastar idle no proxy.
+  const timeout = config?.bandwidthSaver === 'aggressive' ? 2_500 : 5_000;
   try {
-    await page.waitForNetworkIdle({ idleTime: 800, timeout: 8_000 });
+    await page.waitForNetworkIdle({ idleTime: 500, timeout });
   } catch {
     // páginas com polling eterno
   }
@@ -49,7 +73,6 @@ async function collectInternalLinks(page, hostname) {
       if (u.hostname !== host) continue;
       const clean = `${u.origin}${u.pathname}${u.search}`;
       if (seen.has(clean)) continue;
-      // ignora âncoras na mesma página
       if (u.pathname === location.pathname && u.search === location.search) continue;
       seen.add(clean);
       out.push(clean);
@@ -58,7 +81,27 @@ async function collectInternalLinks(page, hostname) {
   }, hostname);
 }
 
-async function browsePage(page, url, logger, label, { preferClick = false } = {}) {
+function resolveEngageBudget(config) {
+  if (config.engageEnabled === false) return 0;
+  const cap = Math.max(0, config.maxClicksPerPage ?? 3);
+  if (cap === 0) return 0;
+  const min = Math.max(0, config.engageClicksMin ?? 1);
+  const max = Math.max(min, config.engageClicksMax ?? Math.min(3, cap));
+  return Math.min(cap, randomInt(min, max));
+}
+
+function isDeadEndHost(url) {
+  try {
+    const h = new URL(url).hostname;
+    return /play\.google\.com|apps\.apple\.com|(^|\.)google\.com$|(^|\.)googleapis\.com$|accounts\.google/i.test(
+      h
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function browsePage(page, url, logger, label, config, { preferClick = false } = {}) {
   logger.info(`${label}: ${url}`);
 
   let navVia = 'goto';
@@ -67,23 +110,50 @@ async function browsePage(page, url, logger, label, { preferClick = false } = {}
     const nav = await navigateLikeHuman(page, url, logger);
     navVia = nav.via;
   } else {
-    resp = await page.goto(url, { waitUntil: 'domcontentloaded' });
+    resp = await gotoWithRetry(page, url, logger);
   }
 
   const status = resp ? resp.status() : null;
-  await waitSettled(page);
+  const redirectHops = await followClientRedirects(page, logger);
+  await waitSettled(page, config);
 
-  const dwellSec = await humanBrowsePause(page, randomInt(5, 14));
-  logger.info(`Lendo página (~${dwellSec}s, via=${navVia})...`);
+  // Leitura parcial → engajamento (cliques) → leitura final.
+  const dwellFirst = await humanBrowsePause(page, randomInt(1, 2));
+  const onDeadEnd = isDeadEndHost(page.url());
+  const budget = onDeadEnd ? 0 : resolveEngageBudget(config);
+  let engage = { clicks: [], clickCount: 0 };
+  if (onDeadEnd) {
+    logger.info('Host sem CTR (Play Store/Google) — pulando cliques');
+  } else if (budget > 0) {
+    logger.info(`Engajando página (até ${budget} click(s) CTR verificados)...`);
+    engage = await humanEngage(page, {
+      maxClicks: budget,
+      clickSelector: config.clickSelector,
+      logger,
+    });
+  }
+  const dwellLast = await humanBrowsePause(page, randomInt(0, 1));
+  const dwellSec = dwellFirst + dwellLast;
+
+  logger.info(
+    `Lendo página (~${dwellSec}s, via=${navVia}, clicksVerificados=${engage.verifiedCount ?? engage.clickCount}/${engage.clickCount})...`
+  );
 
   const meta = await readPageMeta(page);
   logger.info(
-    `Resposta: status=${status ?? 'n/a'} | title="${meta.title}" | final=${meta.finalUrl} | texto≈${meta.bodyLen} chars`
+    `Resposta: status=${status ?? 'n/a'} | title="${meta.title}" | final=${meta.finalUrl} | texto≈${meta.bodyLen} chars | clicksOk=${engage.verifiedCount ?? engage.clickCount}`
   );
   if (!meta.title && meta.bodyLen < 40) {
     logger.warn('Página quase vazia (title vazio + pouco texto).');
   }
-  return { status, navVia, ...meta };
+  return {
+    status,
+    navVia,
+    redirectHops,
+    clicks: engage.clicks,
+    clickCount: engage.clickCount,
+    ...meta,
+  };
 }
 
 async function run(page, { config, logger }) {
@@ -94,27 +164,46 @@ async function run(page, { config, logger }) {
   if (config.includeReferrer && config.referrers.length) {
     const ref = pick(config.referrers);
     logger.info(`Referrer: ${ref}`);
-    await page.goto(ref, { waitUntil: 'domcontentloaded' });
-    // Pausa curta no referrer (humano não pula instantâneo).
+    await gotoWithRetry(page, ref, logger, { attempts: 2 });
     await sleep(randomInt(1200, 3500));
   }
 
   const entryUrl = pick(config.targetUrls);
-
   const entryHost = new URL(entryUrl).hostname;
   const visited = new Set();
   const path = [];
+  const allClicks = [];
 
-  const first = await browsePage(page, entryUrl, logger, 'Entrada', { preferClick: false });
+  const first = await browsePage(page, entryUrl, logger, 'Entrada', config, {
+    preferClick: false,
+  });
   visited.add(first.finalUrl.split('#')[0]);
   path.push(first.finalUrl);
+  allClicks.push(...(first.clicks || []));
 
-  const pagesMin = Math.max(0, config.browsePagesMin ?? 1);
-  const pagesMax = Math.max(pagesMin, config.browsePagesMax ?? 3);
-  const extraPages = randomInt(pagesMin, pagesMax);
+  const pagesMin = Math.max(0, config.browsePagesMin ?? 0);
+  const pagesMax = Math.max(pagesMin, config.browsePagesMax ?? 0);
+  let extraPages = pagesMax > 0 ? randomInt(pagesMin, pagesMax) : 0;
 
-  let links = await collectInternalLinks(page, entryHost);
-  logger.info(`Links internos encontrados: ${links.length}`);
+  // Após engajamento, host final pode ter mudado (smartlink → offer).
+  let browseHost = entryHost;
+  try {
+    browseHost = new URL(first.finalUrl).hostname;
+  } catch {
+    // keep entryHost
+  }
+
+  // Loja pesada (AliExpress etc.) consome MB sem nova impressão no smartlink.
+  if (extraPages > 0 && isHeavyOfferHost(browseHost)) {
+    logger.info(
+      `Host oferta pesada (${browseHost}) — pulando navegação interna (economiza banda)`
+    );
+    extraPages = 0;
+  }
+
+  let links = extraPages > 0 ? await collectInternalLinks(page, browseHost) : [];
+  if (extraPages > 0) logger.info(`Links internos encontrados: ${links.length}`);
+  else if (pagesMax === 0) logger.info('BROWSE_PAGES=0 — só a entrada (economiza banda)');
 
   let navigated = 0;
   for (let i = 0; i < extraPages; i += 1) {
@@ -127,14 +216,19 @@ async function run(page, { config, logger }) {
     const next = pick(candidates);
 
     try {
-      const step = await browsePage(page, next, logger, `Navegação ${i + 1}/${extraPages}`, {
+      const step = await browsePage(page, next, logger, `Navegação ${i + 1}/${extraPages}`, config, {
         preferClick: true,
       });
       visited.add(step.finalUrl.split('#')[0]);
       path.push(step.finalUrl);
+      allClicks.push(...(step.clicks || []));
       navigated += 1;
-      // atualiza pool de links a partir da página atual
-      const more = await collectInternalLinks(page, entryHost);
+      try {
+        browseHost = new URL(step.finalUrl).hostname;
+      } catch {
+        // keep
+      }
+      const more = await collectInternalLinks(page, browseHost);
       links = [...new Set([...links, ...more])];
     } catch (err) {
       logger.warn(`Falha ao abrir ${next}: ${err.message}`);
@@ -150,6 +244,9 @@ async function run(page, { config, logger }) {
       internalNavigations: navigated,
       status: first.status,
       title: first.title,
+      clickCount: allClicks.length,
+      verifiedClicks: allClicks.filter((c) => c.verified).length,
+      clicks: allClicks.slice(0, 20),
     },
   };
 }

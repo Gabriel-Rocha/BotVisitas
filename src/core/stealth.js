@@ -61,7 +61,7 @@ function buildRealisticHeaders(userAgent, { isMobile = false, acceptLanguage = n
     'Upgrade-Insecure-Requests': '1',
   };
 
-  // Client Hints só fazem sentido em Chromium (não Safari iOS puro).
+  // Client Hints: Chrome desktop/Android. CriOS (iOS) não envia sec-ch-ua típico.
   if (/Chrome\//i.test(userAgent) && !/CriOS/i.test(userAgent)) {
     headers['sec-ch-ua'] =
       `"Chromium";v="${major}", "Not(A:Brand";v="24", "Google Chrome";v="${major}"`;
@@ -70,6 +70,74 @@ function buildRealisticHeaders(userAgent, { isMobile = false, acceptLanguage = n
   }
 
   return headers;
+}
+
+/**
+ * Alinha navigator.* ao perfil mobile/tablet (platform, touch, hardware).
+ * Deve rodar via evaluateOnNewDocument antes da 1ª navegação.
+ */
+async function applyDeviceHints(page, { isMobile = false, hasTouch = false, userAgent = '' } = {}) {
+  const ua = String(userAgent || '');
+  let platform = 'Win32';
+  if (/iPhone/i.test(ua)) platform = 'iPhone';
+  else if (/iPad/i.test(ua)) platform = 'iPad';
+  else if (/Android/i.test(ua)) platform = 'Linux armv8l';
+  else if (/Mac OS X/i.test(ua)) platform = 'MacIntel';
+
+  const maxTouchPoints = hasTouch ? (/iPad/i.test(ua) ? 5 : 5) : 0;
+  const vendor = /AppleWebKit/i.test(ua) && (/iPhone|iPad|CriOS/i.test(ua)) ? 'Apple Computer, Inc.' : 'Google Inc.';
+
+  await page.evaluateOnNewDocument(
+    (opts) => {
+      try {
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+          get: () => opts.maxTouchPoints,
+          configurable: true,
+        });
+      } catch {
+        // ignore
+      }
+      try {
+        Object.defineProperty(navigator, 'platform', {
+          get: () => opts.platform,
+          configurable: true,
+        });
+      } catch {
+        // ignore
+      }
+      try {
+        Object.defineProperty(navigator, 'vendor', {
+          get: () => opts.vendor,
+          configurable: true,
+        });
+      } catch {
+        // ignore
+      }
+      if (opts.hasTouch) {
+        try {
+          if (!('ontouchstart' in window)) {
+            window.ontouchstart = null;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    },
+    { platform, maxTouchPoints, vendor, hasTouch: Boolean(hasTouch), isMobile: Boolean(isMobile) }
+  );
+
+  // Emulação de toque via CDP (além de viewport.isMobile/hasTouch).
+  if (hasTouch) {
+    try {
+      const client = await page.createCDPSession();
+      await client.send('Emulation.setTouchEmulationEnabled', {
+        enabled: true,
+        maxTouchPoints: maxTouchPoints || 1,
+      });
+    } catch {
+      // CDP indisponível
+    }
+  }
 }
 
 /**
@@ -276,22 +344,653 @@ async function humanScroll(page) {
  * @param {number} [dwellSec] — se omitido, sorteia 5–14s
  */
 async function humanBrowsePause(page, dwellSec) {
-  const sec = dwellSec != null ? dwellSec : randomInt(5, 14);
+  const sec = dwellSec != null ? dwellSec : randomInt(1, 3);
+  if (sec <= 0) {
+    await humanScroll(page);
+    return 0;
+  }
   const vp = page.__botViewport || { width: 1280, height: 720 };
 
-  await sleep(randomInt(400, 1200));
+  await sleep(randomInt(150, 400));
   await humanMouseMove(
     page,
     randomInt(40, Math.max(80, vp.width - 40)),
     randomInt(60, Math.max(100, Math.floor(vp.height * 0.6)))
   );
 
-  const firstChunk = Math.min(sec, randomInt(2, 4));
+  const firstChunk = Math.min(sec, 1);
   await sleep(firstChunk * 1000);
   await humanScroll(page);
   await sleep(Math.max(0, sec - firstChunk) * 1000);
 
   return sec;
+}
+
+/**
+ * Segue redirects de JS / meta refresh (ex.: AliExpress s.click mostrando <script> cru).
+ */
+async function followClientRedirects(page, logger, { maxHops = 6 } = {}) {
+  const hops = [];
+  for (let i = 0; i < maxHops; i += 1) {
+    const before = page.url();
+
+    // Espera redirect espontâneo (window.location / meta).
+    try {
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4_500 }),
+        sleep(2_200),
+      ]);
+    } catch {
+      // timeout ok
+    }
+
+    let forced = null;
+    try {
+      forced = await page.evaluate(() => {
+        const bodyText = (document.body && document.body.innerText) || '';
+        const html = document.documentElement ? document.documentElement.innerHTML : '';
+        const looksLikeRawScript =
+          /^\s*<script/i.test(bodyText.trim()) ||
+          (bodyText.includes('window.location') && bodyText.includes('script'));
+
+        const patterns = [
+          /window\.location\.href\s*=\s*['"]([^'"]+)['"]/i,
+          /location\.href\s*=\s*['"]([^'"]+)['"]/i,
+          /location\.replace\(\s*['"]([^'"]+)['"]/i,
+          /location\.assign\(\s*['"]([^'"]+)['"]/i,
+        ];
+        if (looksLikeRawScript || /location\.(href|replace|assign)/i.test(html)) {
+          for (const re of patterns) {
+            const m = html.match(re) || bodyText.match(re);
+            if (m && m[1] && /^https?:\/\//i.test(m[1])) return m[1];
+          }
+        }
+
+        const meta = document.querySelector('meta[http-equiv="refresh" i]');
+        if (meta) {
+          const content = meta.getAttribute('content') || '';
+          const m = content.match(/url\s*=\s*([^\s;]+)/i);
+          if (m) {
+            try {
+              return new URL(m[1].replace(/['"]/g, ''), location.href).href;
+            } catch {
+              return null;
+            }
+          }
+        }
+        return null;
+      });
+    } catch {
+      forced = null;
+    }
+
+    if (forced && forced.split('#')[0] !== before.split('#')[0]) {
+      if (logger) logger.info(`Redirect cliente → ${forced}`);
+      try {
+        await page.goto(forced, { waitUntil: 'domcontentloaded' });
+        hops.push(forced);
+        continue;
+      } catch (err) {
+        if (logger) logger.warn(`Falha no redirect cliente: ${err.message}`);
+        break;
+      }
+    }
+
+    const after = page.url();
+    if (after.split('#')[0] !== before.split('#')[0]) {
+      hops.push(after);
+      continue;
+    }
+    break;
+  }
+  return hops;
+}
+
+async function clickAtBox(page, box) {
+  if (!box || box.width < 2 || box.height < 2) return false;
+  const x = box.x + box.width * (0.3 + Math.random() * 0.4);
+  const y = box.y + box.height * (0.3 + Math.random() * 0.4);
+  const useTouch =
+    Boolean(page.__botHasTouch) ||
+    page.__botDeviceType === 'mobile' ||
+    page.__botDeviceType === 'tablet';
+
+  if (useTouch && page.touchscreen) {
+    await sleep(randomInt(80, 280));
+    try {
+      await page.touchscreen.tap(x, y);
+      return true;
+    } catch {
+      // fallback mouse abaixo
+    }
+  }
+
+  await humanMouseMove(page, x, y);
+  await sleep(randomInt(120, 450)); // hover antes do clique (trackers olham isso)
+  try {
+    // Sequência real de ponteiro (não element.click() sintético).
+    await page.mouse.move(x, y);
+    await page.mouse.down({ button: 'left' });
+    await sleep(randomInt(45, 130));
+    await page.mouse.up({ button: 'left' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function installClickProbe(page) {
+  try {
+    await page.evaluate(() => {
+      if (window.__botClickProbe) return;
+      window.__botClickProbe = { count: 0, trusted: 0, last: null };
+      const mark = (type) => (e) => {
+        window.__botClickProbe.count += 1;
+        if (e.isTrusted) window.__botClickProbe.trusted += 1;
+        window.__botClickProbe.last = {
+          type,
+          tag: e.target && e.target.tagName,
+          isTrusted: e.isTrusted,
+          x: e.clientX,
+          y: e.clientY,
+          ts: Date.now(),
+        };
+      };
+      document.addEventListener('pointerdown', mark('pointerdown'), true);
+      document.addEventListener('mousedown', mark('mousedown'), true);
+      document.addEventListener('click', mark('click'), true);
+      document.addEventListener('mouseup', mark('mouseup'), true);
+    });
+  } catch {
+    // ignore
+  }
+}
+
+async function readClickProbe(page) {
+  try {
+    return await page.evaluate(() => window.__botClickProbe || { count: 0, trusted: 0 });
+  } catch {
+    return { count: 0, trusted: 0 };
+  }
+}
+
+/**
+ * Candidatos priorizando CTA/ads e evitando footer/legal/search (que “clicam” sem CTR).
+ */
+async function collectClickCandidates(page) {
+  return page.evaluate(() => {
+    const sel =
+      'a[href], button, [role="button"], input[type="submit"], input[type="button"], [onclick], .btn, .button, [data-cta], [data-click], [data-ad], ins.adsbygoogle, .adsbygoogle';
+    const nodes = [...document.querySelectorAll(sel)];
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    const out = [];
+
+    function inFooterOrNav(el) {
+      let n = el;
+      for (let i = 0; i < 8 && n; i += 1) {
+        const id = `${n.id || ''} ${n.className || ''} ${n.tagName || ''}`.toLowerCase();
+        if (/footer|nav|menu|cookie|consent|privacy|legal|sidebar|breadcrumb|search/.test(id)) {
+          return true;
+        }
+        if (n.tagName === 'FOOTER' || n.tagName === 'NAV' || n.tagName === 'HEADER') return true;
+        n = n.parentElement;
+      }
+      return false;
+    }
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      const r = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      if (r.width < 12 || r.height < 12) continue;
+      if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) {
+        continue;
+      }
+      if (r.bottom < 0 || r.top > vh + 40) continue;
+      if (style.pointerEvents === 'none') continue;
+
+      const text = (
+        el.innerText ||
+        el.value ||
+        el.getAttribute('aria-label') ||
+        el.getAttribute('title') ||
+        el.getAttribute('alt') ||
+        ''
+      )
+        .trim()
+        .slice(0, 100);
+      const href = el.getAttribute('href') || '';
+      const blob = `${text} ${href} ${el.className || ''} ${el.id || ''}`.toLowerCase();
+
+      if (
+        /logout|sign[\s-]?out|delete|unsubscribe|javascript:void|privacy|terms|cookie|gdpr|dsa|regulatory|agreement|policy|transparenc|developer website|google search|sign in|log in|create account|share|report|back to homep?age|learn more|see more details|see in play store|screenshot|reload the page/i.test(
+          blob
+        )
+      ) {
+        continue;
+      }
+      if (href.startsWith('mailto:') || href.startsWith('tel:')) continue;
+      try {
+        const u = new URL(href, location.href);
+        if (/play\.google\.com|apps\.apple\.com|(^|\.)google\.com$/i.test(u.hostname)) continue;
+      } catch {
+        // ignore
+      }
+      if (el.tagName === 'INPUT' && /search|q|query/i.test(`${el.name || ''} ${el.id || ''} ${el.placeholder || ''}`)) {
+        continue;
+      }
+      if (inFooterOrNav(el) && !/click|continue|start|claim|download|play|go|watch|join/i.test(text)) {
+        continue;
+      }
+
+      let score = 1;
+      if (/^(continue|watch|play|start|click here|get|download|join|enter|go|next|continuar|assistir|começar)$/i.test(text.trim())) {
+        score += 14;
+      }
+      if (/click|continue|start|play|go|here|download|claim|get|open|visit|buy|join|try|watch|free|offer|install|win|attention/i.test(text)) {
+        score += 8;
+      }
+      if (/ad|cta|offer|promo|banner|affiliate|join_overlay/i.test(`${el.className} ${el.id}`)) score += 5;
+      if (/click_id|clickid|\/click|cpc=|utm_|ad_id|campaign/i.test(href)) score += 10;
+      if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') score += 4;
+      if (el.tagName === 'A' && href && href !== '#' && !href.startsWith('#')) {
+        score += 3;
+        try {
+          const u = new URL(href, location.href);
+          if (u.hostname !== location.hostname) score += 4;
+          if (/play\.google\.com|apps\.apple\.com|(^|\.)google\.com$/i.test(u.hostname)) {
+            score -= 50;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dist = Math.hypot(cx - vw / 2, cy - vh * 0.45);
+      score += Math.max(0, 6 - Math.floor(dist / 120));
+      score += Math.min(5, Math.floor((r.width * r.height) / 5000));
+
+      out.push({
+        index: i,
+        score,
+        text,
+        tag: el.tagName,
+        href: href.slice(0, 160),
+        area: Math.round(r.width * r.height),
+      });
+    }
+    out.sort((a, b) => b.score - a.score);
+    return out.filter((c) => c.score > 0).slice(0, 30);
+  });
+}
+
+/** CTA explícito tipo Continue / Watch (interstitial Attention). */
+async function findPrimaryCtaHandle(page) {
+  const handle = await page.evaluateHandle(() => {
+    const preferred =
+      /continue|watch(\s+now)?|play(\s+now)?|start|click\s+here|get\s+started|download|join|enter|go|next|continuar|assistir|começar|claim/i;
+    const junk =
+      /google search|back to homep?age|learn more|play store|screenshot|reload|sign in|log in/i;
+    const nodes = [
+      ...document.querySelectorAll(
+        'a[href], button, [role="button"], input[type="submit"], input[type="button"], div[onclick], span[onclick]'
+      ),
+    ];
+    let best = null;
+    let bestScore = 0;
+    for (const el of nodes) {
+      const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+      if (!text || text.length > 80) continue;
+      if (junk.test(text)) continue;
+      const href = el.getAttribute && el.getAttribute('href');
+      if (href && /play\.google\.com|apps\.apple\.com|google\.com\/search/i.test(href)) continue;
+      const r = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      if (r.width < 20 || r.height < 16) continue;
+      if (style.visibility === 'hidden' || style.display === 'none') continue;
+      if (r.bottom < 0 || r.top > window.innerHeight) continue;
+      let score = 0;
+      if (preferred.test(text)) score += 10;
+      if (/^continue$/i.test(text)) score += 8;
+      score += Math.max(0, 4 - Math.floor(Math.hypot(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight * 0.4) / 150));
+      if (score > bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+    return bestScore >= 10 ? best : null;
+  });
+  const el = handle.asElement();
+  if (!el) {
+    try {
+      await handle.dispose();
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+  return el;
+}
+
+async function clickIframeAds(page, logger) {
+  const results = [];
+  const frames = page.frames().filter((f) => f !== page.mainFrame());
+  for (const frame of frames.slice(0, 6)) {
+    try {
+      const el = await frame.frameElement();
+      if (!el) continue;
+      const box = await el.boundingBox();
+      if (!box || box.width < 40 || box.height < 40) continue;
+      if (box.y > (page.__botViewport?.height || 900) + 20) continue;
+      const beforeUrl = page.url();
+      const probeBefore = await readClickProbe(page);
+      const ok = await clickAtBox(page, box);
+      if (!ok) continue;
+      await sleep(randomInt(800, 2000));
+      const probeAfter = await readClickProbe(page);
+      const urlChanged = page.url().split('#')[0] !== beforeUrl.split('#')[0];
+      const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
+      const verified = urlChanged || trustedDelta > 0;
+      results.push({
+        via: 'iframe',
+        verified,
+        urlChanged,
+        trustedDelta,
+        href: frame.url().slice(0, 120),
+      });
+      if (logger) {
+        logger.info(
+          `Click CTR iframe ${verified ? 'OK' : 'SEM CONFIRMAÇÃO'} | trustedΔ=${trustedDelta} | urlChanged=${urlChanged}`
+        );
+      }
+      if (verified) {
+        await followClientRedirects(page, logger, { maxHops: 4 });
+        break; // um iframe confirmado basta por rodada
+      }
+    } catch {
+      // cross-origin / detached
+    }
+  }
+  return results;
+}
+
+/**
+ * Engajamento com verificação: só conta clique se houver evento trusted ou mudança de URL.
+ * Evita “clicks fantasmas” em links de footer/legal que não geram CTR.
+ */
+async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger = null } = {}) {
+  const record = [];
+  const vp = page.__botViewport || { width: 1280, height: 720 };
+  const selectorList =
+    'a[href], button, [role="button"], input[type="submit"], input[type="button"], [onclick], .btn, .button, [data-cta], [data-click], [data-ad], ins.adsbygoogle, .adsbygoogle';
+
+  await installClickProbe(page);
+
+  // Espera ads/CTA hidratarem (aggressive/light sem CSS antigo quebrava isso).
+  await sleep(randomInt(800, 1600));
+  try {
+    await page.waitForSelector('a[href], button, iframe, [role="button"]', { timeout: 6_000 });
+  } catch {
+    // página sem interativos óbvios
+  }
+  try {
+    await page.waitForNetworkIdle({ idleTime: 600, timeout: 4_000 });
+  } catch {
+    // polling eterno
+  }
+
+  for (let i = 0; i < randomInt(1, 2); i += 1) {
+    await humanMouseMove(
+      page,
+      randomInt(30, Math.max(60, vp.width - 30)),
+      randomInt(40, Math.max(80, vp.height - 40))
+    );
+    await sleep(randomInt(80, 250));
+  }
+  await humanScroll(page);
+  await sleep(randomInt(200, 500));
+
+  const want = Math.max(1, Math.min(maxClicks, randomInt(1, Math.max(1, maxClicks))));
+  let attempts = 0;
+  const maxAttempts = Math.max(want * 5, 8);
+
+  async function attemptClickOnHandle(handle, meta) {
+    const beforeUrl = page.url();
+    await installClickProbe(page);
+    const probeBefore = await readClickProbe(page);
+    try {
+      await handle.evaluate((el) =>
+        el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      );
+    } catch {
+      // ignore
+    }
+    await sleep(randomInt(200, 600));
+    const box = await handle.boundingBox();
+    const fired = await clickAtBox(page, box);
+    if (!fired) return null;
+
+    try {
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8_000 }),
+        sleep(1_500),
+      ]);
+    } catch {
+      // soft
+    }
+    await followClientRedirects(page, logger, { maxHops: 4 });
+
+    const probeAfter = await readClickProbe(page);
+    const urlChanged = page.url().split('#')[0] !== beforeUrl.split('#')[0];
+    const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
+    const finalUrl = page.url();
+    const hrefBlob = `${meta.href || ''} ${finalUrl}`;
+    const trackerish = /click_id|clickid|\/click|cpc=|utm_|ad_id|campaign|aff_|haff_/i.test(
+      hrefBlob
+    );
+    const junkDest = /play\.google\.com|apps\.apple\.com|google\.com\/search|accounts\.google/i.test(
+      hrefBlob
+    );
+    // Trusted no DOM sem nav não é CTR de ads (centro cego, Google Search, etc.).
+    const verified = !junkDest && (urlChanged || (trustedDelta > 0 && trackerish));
+
+    return {
+      ...meta,
+      verified,
+      urlChanged,
+      trustedDelta,
+      isTrusted: trustedDelta > 0,
+      finalUrl,
+    };
+  }
+
+  // 1) CLICK_SELECTOR obrigatório se setado
+  if (clickSelector) {
+    try {
+      await page.waitForSelector(clickSelector, { timeout: 8_000, visible: true });
+      const el = await page.$(clickSelector);
+      if (el) {
+        const result = await attemptClickOnHandle(el, {
+          via: 'selector',
+          selector: clickSelector,
+          tag: 'SEL',
+          text: clickSelector,
+          href: '',
+        });
+        if (result?.verified) {
+          record.push(result);
+          if (logger) {
+            logger.info(
+              `Click CTR VERIFICADO (selector) trustedΔ=${result.trustedDelta} urlChanged=${result.urlChanged}`
+            );
+          }
+        } else if (logger) {
+          logger.warn(`Click selector sem confirmação — tentando outros alvos`);
+        }
+      }
+    } catch (err) {
+      if (logger) logger.warn(`CLICK_SELECTOR indisponível: ${err.message}`);
+    }
+  }
+
+  // 2) CTA primário (Continue / Watch / Play) — interstitial Attention
+  if (record.length < want) {
+    try {
+      const cta = await findPrimaryCtaHandle(page);
+      if (cta) {
+        const label = await cta.evaluate((el) =>
+          (el.innerText || el.value || '').trim().slice(0, 40)
+        );
+        const result = await attemptClickOnHandle(cta, {
+          via: 'primary-cta',
+          tag: 'CTA',
+          text: label,
+          href: '',
+        });
+        if (result?.verified) {
+          record.push(result);
+          if (logger) {
+            logger.info(
+              `Click CTR VERIFICADO (CTA "${label}") trustedΔ=${result.trustedDelta} urlChanged=${result.urlChanged}`
+            );
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3) Iframes de ad
+  if (record.length < want) {
+    const iframeHits = await clickIframeAds(page, logger);
+    for (const hit of iframeHits) {
+      if (hit.verified) record.push(hit);
+    }
+  }
+
+  // 4) CTAs ranqueados com retry
+  while (record.length < want && attempts < maxAttempts) {
+    attempts += 1;
+    await installClickProbe(page);
+
+    let candidates = [];
+    try {
+      candidates = await collectClickCandidates(page);
+    } catch {
+      break;
+    }
+    if (!candidates.length) {
+      if (attempts >= 2) break;
+      await sleep(1200);
+      continue;
+    }
+
+    const pool = candidates.slice(0, Math.min(10, candidates.length));
+    const chosen = pool[randomInt(0, pool.length - 1)];
+
+    let result = null;
+    try {
+      const handles = await page.$$(selectorList);
+      const handle = handles[chosen.index];
+      if (!handle) continue;
+      result = await attemptClickOnHandle(handle, {
+        via: 'engage',
+        tag: chosen.tag,
+        text: chosen.text,
+        href: chosen.href,
+        score: chosen.score,
+      });
+    } catch {
+      result = null;
+    }
+
+    if (!result) continue;
+
+    if (result.verified) {
+      record.push(result);
+      if (logger) {
+        logger.info(
+          `Click CTR VERIFICADO #${record.length}: <${result.tag}> "${(result.text || '').slice(0, 40)}" ` +
+            `trustedΔ=${result.trustedDelta} urlChanged=${result.urlChanged}`
+        );
+      }
+    } else if (logger) {
+      logger.warn(
+        `Click DESCARTADO (sem evento trusted/nav): <${chosen.tag}> "${(chosen.text || '').slice(0, 40)}"`
+      );
+    }
+
+    await sleep(randomInt(250, 700));
+  }
+
+  // 5) Último recurso: toque no centro da viewport (muitos interstitials são full-bleed)
+  if (!record.length) {
+    const beforeUrl = page.url();
+    await installClickProbe(page);
+    const probeBefore = await readClickProbe(page);
+    const cx = Math.floor(vp.width * 0.5);
+    const cy = Math.floor(vp.height * 0.48);
+    const fired = await clickAtBox(page, { x: cx - 20, y: cy - 20, width: 40, height: 40 });
+    if (fired) {
+      try {
+        await Promise.race([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 6_000 }),
+          sleep(1_400),
+        ]);
+      } catch {
+        // soft
+      }
+      await followClientRedirects(page, logger, { maxHops: 4 });
+      const probeAfter = await readClickProbe(page);
+      const urlChanged = page.url().split('#')[0] !== beforeUrl.split('#')[0];
+      const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
+      // Centro cego só conta se a URL mudou (senão a rede de ads não registra).
+      if (urlChanged) {
+        record.push({
+          via: 'viewport-center',
+          verified: true,
+          urlChanged,
+          trustedDelta,
+          tag: 'CENTER',
+          text: 'center',
+          href: '',
+        });
+        if (logger) {
+          logger.info(
+            `Click CTR VERIFICADO (centro viewport) trustedΔ=${trustedDelta} urlChanged=${urlChanged}`
+          );
+        }
+      } else if (logger) {
+        logger.warn(
+          `Click centro viewport DESCARTADO (sem nav) trustedΔ=${trustedDelta}`
+        );
+      }
+    }
+  }
+
+  if (!record.length && logger) {
+    logger.warn(
+      'Nenhum click VERIFICADO nesta página — CTR do site pode não registrar. ' +
+        'Tente CLICK_SELECTOR no CTA ou espere ads carregarem (proxy/geo).'
+    );
+  }
+
+  if (Math.random() < 0.45) await humanScroll(page);
+  await humanMouseMove(
+    page,
+    randomInt(40, Math.max(80, vp.width - 40)),
+    randomInt(60, Math.max(100, Math.floor(vp.height * 0.55)))
+  );
+
+  return {
+    clicks: record,
+    clickCount: record.length,
+    verifiedCount: record.filter((c) => c.verified).length,
+    attempts,
+  };
 }
 
 /**
@@ -342,9 +1041,12 @@ module.exports = {
   chromeMajorFromUa,
   buildRealisticHeaders,
   applyPageStealth,
+  applyDeviceHints,
   applyLocaleHints,
   humanMouseMove,
   humanScroll,
   humanBrowsePause,
+  followClientRedirects,
+  humanEngage,
   navigateLikeHuman,
 };

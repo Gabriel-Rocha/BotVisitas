@@ -6,6 +6,39 @@ const DEVICE_TYPES = ['desktop', 'mobile', 'tablet'];
 const DEFAULT_TYPE = 'desktop';
 
 /**
+ * Parseia WORKER_SLOTS=mobile:au,desktop:de,mobile:us → [{ type, country }, ...]
+ * País opcional (ISO-2). Entradas inválidas são ignoradas.
+ */
+function parseWorkerSlots(raw) {
+  if (!raw || !String(raw).trim()) return [];
+  const slots = [];
+  for (const part of String(raw).split(',')) {
+    const token = part.trim();
+    if (!token) continue;
+    const m = token.match(/^(desktop|mobile|tablet)(?::([a-zA-Z]{2}))?$/i);
+    if (!m) continue;
+    slots.push({
+      type: m[1].toLowerCase(),
+      country: m[2] ? m[2].toLowerCase() : '',
+    });
+  }
+  return slots;
+}
+
+function serializeWorkerSlots(slots) {
+  if (!Array.isArray(slots) || !slots.length) return '';
+  return slots
+    .map((slot) => {
+      const type = DEVICE_TYPES.includes(slot.type) ? slot.type : DEFAULT_TYPE;
+      const cc = String(slot.country || '')
+        .trim()
+        .toLowerCase();
+      return cc && /^[a-z]{2}$/.test(cc) ? `${type}:${cc}` : type;
+    })
+    .join(',');
+}
+
+/**
  * Parseia DEVICE_MIX=desktop:2,mobile:3,tablet:1 → [{ type, count }, ...]
  * Entradas inválidas são ignoradas.
  */
@@ -45,8 +78,37 @@ function expandMix(entries) {
 }
 
 /**
- * Trunca mantendo proporção aproximada (amostra os primeiros N do array expandido
- * depois de intercalar por tipo para não perder uma categoria inteira).
+ * Mix padrão quando DEVICE_MIX está vazio (~55% mobile, ~35% desktop, ~10% tablet).
+ * Tráfego de ads costuma ser majoritariamente mobile.
+ */
+function defaultDeviceTypes(concurrency) {
+  const n = Math.max(1, concurrency || 1);
+  if (n === 1) return ['mobile'];
+  if (n === 2) return ['mobile', 'desktop'];
+
+  let mobile = Math.round(n * 0.55);
+  let tablet = n >= 5 ? Math.max(1, Math.round(n * 0.1)) : 0;
+  let desktop = n - mobile - tablet;
+
+  if (desktop < 1) {
+    desktop = 1;
+    mobile = Math.max(1, n - desktop - tablet);
+  }
+  if (mobile + desktop + tablet !== n) {
+    mobile = Math.max(1, n - desktop - tablet);
+  }
+
+  return expandMix(
+    [
+      { type: 'desktop', count: desktop },
+      { type: 'mobile', count: mobile },
+      { type: 'tablet', count: tablet },
+    ].filter((e) => e.count > 0)
+  );
+}
+
+/**
+ * Trunca mantendo proporção aproximada (intercala por tipo).
  */
 function truncateProportional(types, max) {
   if (types.length <= max) return types;
@@ -76,22 +138,55 @@ function truncateProportional(types, max) {
 /**
  * Resolve a lista de deviceTypes para os workers.
  *
- * - DEVICE_MIX vazio → `concurrency` workers todos desktop
+ * - WORKER_SLOTS setado → 1:1 (device + país), ordem do painel
+ * - DEVICE_MIX vazio → mix padrão (mobile-heavy) com tamanho = CONCURRENCY
  * - DEVICE_MIX setado → soma do mix manda; se proxy capar (`maxWorkers`), trunca
  *
- * @returns {{ types: string[], fromMix: boolean }}
+ * @returns {{ types: string[], fromMix: boolean, slots: { type: string, country: string }[] }}
  */
-function assignDeviceTypes({ deviceMixRaw, concurrency, maxWorkers, logger }) {
+function assignDeviceTypes({
+  workerSlotsRaw,
+  deviceMixRaw,
+  concurrency,
+  maxWorkers,
+  logger,
+}) {
+  const parsedSlots = parseWorkerSlots(workerSlotsRaw);
+  if (parsedSlots.length) {
+    let slots = parsedSlots;
+    const cap = maxWorkers != null ? maxWorkers : slots.length;
+    if (slots.length > cap) {
+      const before = slots.length;
+      slots = slots.slice(0, cap);
+      if (logger) {
+        logger.warn(
+          `WORKER_SLOTS=${before} workers reduzido para ${slots.length} (cap=${cap}).`
+        );
+      }
+    }
+    return {
+      types: slots.map((s) => s.type),
+      fromMix: true,
+      slots,
+    };
+  }
+
   const entries = parseDeviceMixRaw(deviceMixRaw);
   let types;
 
   if (!entries.length) {
-    const n = Math.max(1, concurrency || 1);
-    types = Array.from({ length: n }, () => DEFAULT_TYPE);
-    return { types, fromMix: false };
+    types = defaultDeviceTypes(concurrency);
+    if (logger) {
+      const summary = summarizeDevices(types);
+      const label = Object.entries(summary)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(',');
+      logger.info(`DEVICE_MIX vazio — usando mix padrão {${label}}`);
+    }
+  } else {
+    types = expandMix(entries);
   }
 
-  types = expandMix(entries);
   const cap = maxWorkers != null ? maxWorkers : types.length;
 
   if (types.length > cap) {
@@ -104,7 +199,11 @@ function assignDeviceTypes({ deviceMixRaw, concurrency, maxWorkers, logger }) {
     }
   }
 
-  return { types, fromMix: true };
+  return {
+    types,
+    fromMix: Boolean(entries.length),
+    slots: types.map((type) => ({ type, country: '' })),
+  };
 }
 
 function summarizeDevices(types) {
@@ -150,7 +249,10 @@ function getProfile(deviceProfiles, deviceType) {
 module.exports = {
   DEVICE_TYPES,
   DEFAULT_TYPE,
+  parseWorkerSlots,
+  serializeWorkerSlots,
   parseDeviceMixRaw,
+  defaultDeviceTypes,
   assignDeviceTypes,
   summarizeDevices,
   pickSessionPersona,

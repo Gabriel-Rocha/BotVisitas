@@ -8,6 +8,7 @@ const {
 } = require('./proxy');
 const { createWorker } = require('./worker');
 const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices');
+const { sleep } = require('../utils/sleep');
 const { isFlaggedAnonymousIp, lookupGeoViaProxy, lookupGeo } = require('./geo');
 
 /**
@@ -136,7 +137,8 @@ function createLoop({ config, strategy, logger }) {
     const proxyCap = resolveProxyCap(config, strategy);
     const fallbackConcurrency = resolveConcurrency(config, strategy, logger);
 
-    const { types, fromMix } = assignDeviceTypes({
+    const { types, fromMix, slots } = assignDeviceTypes({
+      workerSlotsRaw: config.workerSlots,
       deviceMixRaw: config.deviceMix,
       concurrency: fallbackConcurrency,
       maxWorkers: proxyCap != null ? proxyCap : undefined,
@@ -198,11 +200,27 @@ function createLoop({ config, strategy, logger }) {
           proxyLease,
           deviceType: type,
           deviceProfile: profile,
+          preferredCountry: slots[i]?.country || null,
         })
       );
     }
 
-    await Promise.all(workers.map((w) => w.run()));
+    // Escalonar start: 40 Chromiums de uma vez satura DataImpulse (ERR_TUNNEL) + RAM.
+    const staggerMs = Math.max(
+      0,
+      Number.parseInt(process.env.WORKER_STAGGER_MS || '800', 10) || 0
+    );
+    if (staggerMs > 0 && workers.length > 1) {
+      logger.info(`Start escalonado: +${staggerMs}ms entre workers (${workers.length} total)`);
+    }
+    const running = [];
+    for (let i = 0; i < workers.length; i += 1) {
+      running.push(workers[i].run());
+      if (staggerMs > 0 && i < workers.length - 1) {
+        await sleep(staggerMs);
+      }
+    }
+    await Promise.all(running);
   }
 
   async function stop() {

@@ -7,8 +7,10 @@ const { resolveSessionLocale } = require('./geo');
 const {
   applyPageStealth,
   applyLocaleHints,
+  applyDeviceHints,
   buildRealisticHeaders,
 } = require('./stealth');
+const { applyBandwidthSaver } = require('./bandwidth');
 
 async function createSession(
   browser,
@@ -27,12 +29,14 @@ async function createSession(
   let viewport;
   let userAgent;
   let isMobile = false;
+  let hasTouch = false;
 
   if (device?.profile) {
     const persona = pickSessionPersona(device.profile);
     viewport = persona.viewport;
     userAgent = persona.userAgent;
     isMobile = Boolean(persona.isMobile);
+    hasTouch = Boolean(persona.hasTouch);
   } else {
     viewport = {
       width: config.viewport.width,
@@ -56,10 +60,14 @@ async function createSession(
 
   // Ofuscação: patches + timezone alinhado ao IP antes de qualquer navegação.
   await applyPageStealth(page, { languages: localeHints.languages });
+  await applyDeviceHints(page, { isMobile, hasTouch, userAgent });
   await applyLocaleHints(page, {
     timezoneId: localeHints.timezoneId,
     locale: localeHints.locale,
   });
+
+  const bwMode = config.bandwidthSaver || 'light';
+  await applyBandwidthSaver(page, { mode: bwMode, logger });
 
   await page.setViewport(viewport);
   await page.setDefaultNavigationTimeout(config.navigationTimeoutMs);
@@ -78,6 +86,8 @@ async function createSession(
     height: viewport.height,
   };
   page.__botDeviceType = device?.type || 'desktop';
+  page.__botHasTouch = hasTouch;
+  page.__botIsMobile = isMobile;
   page.__botTimezone = localeHints.timezoneId;
   page.__botLocale = localeHints.locale;
   page.__botGeo = {
@@ -87,7 +97,7 @@ async function createSession(
   };
 
   logger.debug(
-    `device=${page.__botDeviceType} | tz=${localeHints.timezoneId} | locale=${localeHints.locale} | UA: ${userAgent}`
+    `device=${page.__botDeviceType} | touch=${hasTouch} | tz=${localeHints.timezoneId} | locale=${localeHints.locale} | UA: ${userAgent}`
   );
 
   return page;
