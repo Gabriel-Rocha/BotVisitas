@@ -22,7 +22,7 @@ async function createSession(
 ) {
   const page = await browser.newPage();
 
-  if (activeProxy) {
+  if (activeProxy && !activeProxy.isTuxler) {
     await applyProxyAuth(page, activeProxy);
   }
 
@@ -79,6 +79,12 @@ async function createSession(
       acceptLanguage: localeHints.acceptLanguage,
     })
   );
+
+  try {
+    await page.bringToFront();
+  } catch {
+    // headless / target already focused
+  }
 
   // Guarda na page para strategies / preview / debug.
   page.__botViewport = {

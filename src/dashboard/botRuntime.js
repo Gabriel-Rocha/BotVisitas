@@ -154,6 +154,7 @@ async function start(options = {}) {
         concurrency: config.concurrency,
         deviceMix: config.deviceMix || '',
         proxyEnabled: Boolean(config.proxy?.enabled),
+        tuxlerEnabled: Boolean(config.tuxler?.enabled),
         targetSource: config.targetSource || 'none',
         targetUrls: config.targetUrls || [],
         configSafe,

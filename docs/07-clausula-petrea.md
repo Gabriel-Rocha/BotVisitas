@@ -50,7 +50,7 @@ Para memória do projeto, o que foi pedido e **sera** foi feito:
 
 - Tornar o bot de clique de anúncios **indetectável**.
 - **Humanizar o loop de produção** `directLink`.
-- **Rotação de IP/região por clique** via VPN do Opera.
+- **Rotação de IP/região por clique** via TuxlerVPN (Windows) ou proxy HTTP.
 - Apontar a `directLink` para **smartlink**
 
 ### 2.5 Ofuscação de visitas (2026-07-26)
@@ -65,3 +65,10 @@ Para memória do projeto, o que foi pedido e **sera** foi feito:
 - `src/core/geo.js`: IP (proxy ou egress) → timezone + locale + Accept-Language.
 - Default `STEALTH_GEO_TZ=true`; fallback `STEALTH_TIMEZONE` / `STEALTH_LOCALE`.
 - Worker aplica TZ antes do launch; stats expõem `timezoneId` / `geoCountry`.
+
+### 2.7 Tráfego válido para a rede (2026-08-24)
+- Entrada do smartlink com HTTP Referer + `document.referrer` da geo (não typed/direct).
+- `INCLUDE_REFERRER=true` (default): warmup no Google/Bing da geo e clique num `<a>` até o alvo.
+- Viewability: aba visível, foco, `outerWidth/Height` de janela real; `bringToFront()`.
+- Dwell 5–9s antes do CTR e 3–6s depois (pixels / postback).
+- Default do dashboard alinhado: `INCLUDE_REFERRER=true`.

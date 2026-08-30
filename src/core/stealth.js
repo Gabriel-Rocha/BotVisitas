@@ -258,6 +258,62 @@ async function applyPageStealth(page, { languages = ['pt-BR', 'pt', 'en-US', 'en
       } catch {
         // ignore
       }
+
+      // Viewability: pixels de ads não disparam com document.hidden / aba sem foco.
+      try {
+        Object.defineProperty(document, 'hidden', {
+          get: () => false,
+          configurable: true,
+        });
+        Object.defineProperty(document, 'visibilityState', {
+          get: () => 'visible',
+          configurable: true,
+        });
+        document.hasFocus = () => true;
+        window.blur = () => {};
+        try {
+          Object.defineProperty(document, 'prerendering', {
+            get: () => false,
+            configurable: true,
+          });
+        } catch {
+          // ignore
+        }
+      } catch {
+        // ignore
+      }
+
+      // Headless clássico: outerWidth/Height = 0. Chrome real tem chrome UI.
+      try {
+        const innerW = () => window.innerWidth || 1280;
+        const innerH = () => window.innerHeight || 720;
+        Object.defineProperty(window, 'outerWidth', {
+          get: () => innerW() + 16,
+          configurable: true,
+        });
+        Object.defineProperty(window, 'outerHeight', {
+          get: () => innerH() + 86,
+          configurable: true,
+        });
+        Object.defineProperty(window, 'screenX', {
+          get: () => 12,
+          configurable: true,
+        });
+        Object.defineProperty(window, 'screenY', {
+          get: () => 28,
+          configurable: true,
+        });
+        Object.defineProperty(window, 'screenLeft', {
+          get: () => 12,
+          configurable: true,
+        });
+        Object.defineProperty(window, 'screenTop', {
+          get: () => 28,
+          configurable: true,
+        });
+      } catch {
+        // ignore
+      }
     },
     langs,
     primary
@@ -456,7 +512,7 @@ async function clickAtBox(page, box) {
     page.__botDeviceType === 'tablet';
 
   if (useTouch && page.touchscreen) {
-    await sleep(randomInt(80, 280));
+    await sleep(randomInt(180, 420));
     try {
       await page.touchscreen.tap(x, y);
       return true;
@@ -466,7 +522,7 @@ async function clickAtBox(page, box) {
   }
 
   await humanMouseMove(page, x, y);
-  await sleep(randomInt(120, 450)); // hover antes do clique (trackers olham isso)
+  await sleep(randomInt(280, 800)); // hover antes do clique (IVT marca clique instantâneo)
   try {
     // Sequência real de ponteiro (não element.click() sintético).
     await page.mouse.move(x, y);
@@ -729,7 +785,7 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
   await installClickProbe(page);
 
   // Espera ads/CTA hidratarem (aggressive/light sem CSS antigo quebrava isso).
-  await sleep(randomInt(800, 1600));
+  await sleep(randomInt(1400, 2600));
   try {
     await page.waitForSelector('a[href], button, iframe, [role="button"]', { timeout: 6_000 });
   } catch {
@@ -767,7 +823,7 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
     } catch {
       // ignore
     }
-    await sleep(randomInt(200, 600));
+    await sleep(randomInt(500, 1400));
     const box = await handle.boundingBox();
     const fired = await clickAtBox(page, box);
     if (!fired) return null;
@@ -993,6 +1049,128 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
   };
 }
 
+const ORGANIC_REFERRERS = {
+  AU: [
+    'https://www.google.com.au/',
+    'https://www.google.com.au/search?q=news',
+    'https://www.bing.com/',
+  ],
+  DE: [
+    'https://www.google.de/',
+    'https://www.google.de/search?q=nachrichten',
+    'https://www.bing.com/',
+  ],
+  US: [
+    'https://www.google.com/',
+    'https://www.google.com/search?q=news',
+    'https://www.bing.com/',
+  ],
+  GB: ['https://www.google.co.uk/', 'https://www.bing.com/'],
+  CA: ['https://www.google.ca/', 'https://www.bing.com/'],
+  NL: ['https://www.google.nl/', 'https://www.bing.com/'],
+  CH: ['https://www.google.ch/', 'https://www.bing.com/'],
+  FR: ['https://www.google.fr/', 'https://www.bing.com/'],
+};
+
+function pickOrganicReferrer(countryCode, fallbackList = []) {
+  const cc = String(countryCode || '').toUpperCase();
+  const pool = ORGANIC_REFERRERS[cc] || (fallbackList.length ? fallbackList : ORGANIC_REFERRERS.US);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+async function assertForeground(page) {
+  try {
+    await page.bringToFront();
+  } catch {
+    // headless / target already focused
+  }
+  try {
+    await page.evaluate(() => {
+      try {
+        window.focus();
+      } catch {
+        // ignore
+      }
+      try {
+        document.dispatchEvent(new Event('visibilitychange'));
+      } catch {
+        // ignore
+      }
+    });
+  } catch {
+    // página fechada
+  }
+}
+
+/**
+ * Abre o smartlink como tráfego orgânico: HTTP Referer + document.referrer.
+ * Warmup (opcional) visita a origem (homepage da geo) e clica um <a> —
+ * a rede vê click-through, não typed/direct. Nunca usa rel=noreferrer.
+ */
+async function openAsOrganicVisit(page, url, logger, { referrerUrl, warmup = false } = {}) {
+  const referer = referrerUrl || 'https://www.google.com/';
+  let warmupOrigin = referer;
+  try {
+    warmupOrigin = `${new URL(referer).origin}/`;
+  } catch {
+    warmupOrigin = referer;
+  }
+
+  if (warmup) {
+    try {
+      await page.goto(warmupOrigin, { waitUntil: 'domcontentloaded', timeout: 25_000 });
+      await sleep(randomInt(1200, 2800));
+      try {
+        await humanScroll(page);
+      } catch {
+        // ignore
+      }
+      await page.evaluate((target) => {
+        const a = document.createElement('a');
+        a.href = target;
+        a.rel = 'noopener';
+        a.referrerPolicy = 'no-referrer-when-downgrade';
+        a.target = '_self';
+        a.style.position = 'fixed';
+        a.style.left = '12px';
+        a.style.top = '12px';
+        a.style.zIndex = '2147483647';
+        a.textContent = 'Continue';
+        document.body.appendChild(a);
+        a.click();
+      }, url);
+      try {
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45_000 });
+      } catch {
+        // SPA / já navegou
+      }
+      const landed = page.url() || '';
+      let stillOnSource = true;
+      try {
+        const host = new URL(landed).hostname;
+        stillOnSource =
+          /(^|\.)google\.[a-z.]+$/i.test(host) || /(^|\.)bing\.com$/i.test(host);
+      } catch {
+        stillOnSource = true;
+      }
+      if (landed && /^https?:/i.test(landed) && !stillOnSource) {
+        if (logger) logger.info(`Entrada orgânica (click-through) referer=${warmupOrigin}`);
+        await assertForeground(page);
+        return { via: 'referrer-click', referer: warmupOrigin };
+      }
+    } catch (err) {
+      if (logger) {
+        logger.warn(`Warmup de referrer falhou (${err.message}) — goto com header Referer`);
+      }
+    }
+  }
+
+  await page.goto(url, { waitUntil: 'domcontentloaded', referer, timeout: 60_000 });
+  if (logger) logger.info(`Entrada orgânica (Referer header) referer=${referer}`);
+  await assertForeground(page);
+  return { via: 'goto-referer', referer };
+}
+
 /**
  * Prefere clique em `<a href>` interno a `page.goto` (histórico/referrer mais natural).
  * Fallback: goto.
@@ -1049,4 +1227,6 @@ module.exports = {
   followClientRedirects,
   humanEngage,
   navigateLikeHuman,
+  pickOrganicReferrer,
+  openAsOrganicVisit,
 };

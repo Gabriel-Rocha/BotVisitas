@@ -36,8 +36,22 @@ O projeto busca o **máximo razoável e sustentado** — não marketing de “in
 | Headers | `buildRealisticHeaders` | Accept-Language + Client Hints alinhados ao UA e à região |
 | Personas | `device-profiles.json` | Só UAs Chromium coerentes (sem Firefox/Safari falso) |
 | Comportamento | `humanBrowsePause`, `humanEngage`, `navigateLikeHuman` | Scroll, mouse, dwell, **cliques reais** (CTR), follow redirect JS |
+| Tráfego válido | `pickOrganicReferrer`, `openAsOrganicVisit` | HTTP Referer + `document.referrer` da geo; warmup opcional (Google/Bing → clique no smartlink); aba visível / com foco; dwell antes e depois do CTR |
 
 Módulos: [`src/core/stealth.js`](../src/core/stealth.js) · [`src/core/geo.js`](../src/core/geo.js).
+
+### Sinais que a rede marca como inválido (e o que fazemos)
+
+| Sinal | Mitigação |
+|-------|-----------|
+| Referrer vazio / direct | 1ª visita sempre com `Referer` da geo (google.com.au, google.de, …) |
+| Typed-in / sem click-through | `INCLUDE_REFERRER=true` visita a homepage do buscador e clica um `<a>` (`rel=noopener`, nunca `noreferrer`) |
+| `document.hidden` / aba sem foco | Patch `hidden=false`, `visibilityState=visible`, `hasFocus()`, `bringToFront()` |
+| `outerWidth/Height = 0` (headless) | outer* alinhado ao inner + chrome UI; `screenX/Y` ≠ 0 |
+| Clique rápido demais | Dwell 5–9s na landing, hover 0,3–0,8s, pausa 0,5–1,4s no alvo antes do clique |
+| Pixel de viewability | Dwell extra 3–6s depois do clique; `BANDWIDTH_SAVER=light` (não `aggressive`) para não bloquear pixel/CSS |
+
+`INCLUDE_REFERRER=false` ainda envia o header Referer; só pula o warmup no Google (menos banda, sinal um pouco mais fraco).
 
 ---
 
@@ -49,6 +63,9 @@ STEALTH_GEO_TZ=true
 # Fallback se geo estiver off ou a API falhar
 STEALTH_TIMEZONE=America/Sao_Paulo
 STEALTH_LOCALE=pt-BR
+
+# true = warmup no Google/Bing da geo (click-through). false = só header Referer
+INCLUDE_REFERRER=true
 ```
 
 Com proxy: geo usa `proxy.host`. Sem proxy: geo usa o IP de egress da máquina.

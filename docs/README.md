@@ -13,7 +13,7 @@ Documentação enxuta para reduzir tokens e manter coerência na refatoração.
 7. [05-referencia-tecnica.md](./05-referencia-tecnica.md) ← referência completa (módulos, config, fluxo)
 8. **[07-clausula-petrea.md](./07-clausula-petrea.md)** ← ⚖️ FUNDACIONAL: cláusula pétrea + registro de alterações
 9. [08-docker.md](./08-docker.md) ← execução padrão no container
-10. [09-proxies-webshare.md](./09-proxies-webshare.md) ← plano free Webshare (máx. 10)
+10. [09-proxies-webshare.md](./09-proxies-webshare.md) ← Tuxler (grátis) + proxy HTTP opcional
 11. [10-dashboard.md](./10-dashboard.md) ← painel web de operação
 12. **[11-ofuscacao.md](./11-ofuscacao.md)** ← 🔒 requisito crítico: visita humana / anti-detecção
 13. [12-bandwidth.md](./12-bandwidth.md) ← economia de banda do proxy

@@ -72,13 +72,17 @@ function createWorker({
   async function acquireUsableProxy() {
     if (!proxyLease) return null;
 
-    const skipFlagged = Boolean(config.proxy?.skipFlagged);
+    const skipFlagged = Boolean(config.proxy?.skipFlagged) && !config.tuxler?.enabled;
     const maxAttempts = Math.max(1, proxyLease.size || 1);
     let lastHints = null;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       activeProxy = await acquireProxy();
       lastHints = await resolveLocaleForProxy(activeProxy);
+
+      if (activeProxy?.isTuxler) {
+        return { proxy: activeProxy, hints: lastHints };
+      }
 
       const wanted = String(activeProxy.country || '').toUpperCase();
       const got = String(lastHints.countryCode || '').toUpperCase();
@@ -113,7 +117,7 @@ function createWorker({
 
   async function resolveLocaleForProxy(proxy) {
     const hints = await resolveSessionLocale({
-      proxy,
+      proxy: proxy?.isTuxler ? null : proxy,
       fallbackTimezone: config.stealth?.timezoneId || 'America/Sao_Paulo',
       fallbackLocale: config.stealth?.locale || 'pt-BR',
       enabled: config.stealth?.geoTz !== false,
@@ -154,7 +158,7 @@ function createWorker({
         warn: (...a) => log('warn', ...a),
         debug: (...a) => log('debug', ...a),
       },
-      activeProxy,
+      activeProxy?.isTuxler ? null : activeProxy,
       { lang: localeHints.locale }
     );
 

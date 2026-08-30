@@ -9,6 +9,8 @@ const {
   humanEngage,
   followClientRedirects,
   navigateLikeHuman,
+  pickOrganicReferrer,
+  openAsOrganicVisit,
 } = require('../core/stealth');
 
 async function gotoWithRetry(page, url, logger, { attempts = 3 } = {}) {
@@ -101,14 +103,20 @@ function isDeadEndHost(url) {
   }
 }
 
-async function browsePage(page, url, logger, label, config, { preferClick = false } = {}) {
+async function browsePage(page, url, logger, label, config, opts = {}) {
   logger.info(`${label}: ${url}`);
 
   let navVia = 'goto';
   let resp = null;
-  if (preferClick) {
+  if (opts.preferClick) {
     const nav = await navigateLikeHuman(page, url, logger);
     navVia = nav.via;
+  } else if (opts.organic) {
+    const organic = await openAsOrganicVisit(page, url, logger, {
+      referrerUrl: opts.referrerUrl,
+      warmup: Boolean(opts.warmup),
+    });
+    navVia = organic.via;
   } else {
     resp = await gotoWithRetry(page, url, logger);
   }
@@ -118,7 +126,7 @@ async function browsePage(page, url, logger, label, config, { preferClick = fals
   await waitSettled(page, config);
 
   // Leitura parcial → engajamento (cliques) → leitura final.
-  const dwellFirst = await humanBrowsePause(page, randomInt(1, 2));
+  const dwellFirst = await humanBrowsePause(page, randomInt(5, 9));
   const onDeadEnd = isDeadEndHost(page.url());
   const budget = onDeadEnd ? 0 : resolveEngageBudget(config);
   let engage = { clicks: [], clickCount: 0 };
@@ -132,7 +140,7 @@ async function browsePage(page, url, logger, label, config, { preferClick = fals
       logger,
     });
   }
-  const dwellLast = await humanBrowsePause(page, randomInt(0, 1));
+  const dwellLast = await humanBrowsePause(page, randomInt(3, 6));
   const dwellSec = dwellFirst + dwellLast;
 
   logger.info(
@@ -161,21 +169,18 @@ async function run(page, { config, logger }) {
     throw new Error('STRATEGY=directLink exige TARGET_URLS no .env');
   }
 
-  if (config.includeReferrer && config.referrers.length) {
-    const ref = pick(config.referrers);
-    logger.info(`Referrer: ${ref}`);
-    await gotoWithRetry(page, ref, logger, { attempts: 2 });
-    await sleep(randomInt(1200, 3500));
-  }
-
   const entryUrl = pick(config.targetUrls);
   const entryHost = new URL(entryUrl).hostname;
   const visited = new Set();
   const path = [];
   const allClicks = [];
+  const referrerUrl = pickOrganicReferrer(page.__botGeo?.countryCode, config.referrers);
 
   const first = await browsePage(page, entryUrl, logger, 'Entrada', config, {
     preferClick: false,
+    organic: true,
+    warmup: Boolean(config.includeReferrer),
+    referrerUrl,
   });
   visited.add(first.finalUrl.split('#')[0]);
   path.push(first.finalUrl);

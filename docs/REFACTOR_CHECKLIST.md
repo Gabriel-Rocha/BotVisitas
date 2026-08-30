@@ -12,7 +12,7 @@
 |---|----------|-------|
 | 1 | Escopo | Reescrita do zero; colaborativo + multi-dispositivo |
 | 2 | Direct Link | **default = directLink** |
-| 3 | Proxies | Lista via env; rodízio por visitante (default) |
+| 3 | Proxies | Tuxler gratuito (Windows) ou lista HTTP via env |
 | 4 | JS | **CommonJS** |
 | 5 | Chromium | Chrome do sistema (autodetect) ou Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
 | 6 | Blog / GH Pages / fetch | Fora do v1 |
@@ -93,6 +93,11 @@
 - [x] Fingerprint JS (platform, WebGL, tela, hardware)
 - [x] Sinais de automação (stealth plugin + flags)
 - [x] TLS via Chrome do sistema (JA3 = binário; sem spoof de TLS)
+- [x] Tráfego válido: Referer orgânico da geo + warmup Google/Bing
+- [x] Viewability (aba visível, foco, outerWidth ≠ 0)
+- [x] Dwell 5–9s antes do CTR e 3–6s depois
+- [x] TuxlerVPN (Windows): rotação residencial gratuita por worker (mutex + PowerShell)
+- [x] Tor SOCKS bloqueado (9050/9150)
 
 ---
 

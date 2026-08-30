@@ -208,8 +208,11 @@ Copie `.env.example` para `.env`. **Nunca** commite o `.env`.
 | `TARGET_URLS` | *(vazio)* | CSV | URLs de entrada (`directLink`); smartlinks ou qualquer host |
 | `BROWSE_PAGES_MIN` | `1` | int | Mín. de páginas internas após a entrada |
 | `BROWSE_PAGES_MAX` | `3` | int | Máx. de páginas internas após a entrada |
-| `INCLUDE_REFERRER` | `true` | bool | Navega por um referrer antes do alvo |
-| `PROXY_ENABLED` | `false` | bool | Liga o proxy (experimental / custo) |
+| `INCLUDE_REFERRER` | `true` | bool | Warmup no Google/Bing da geo + clique no smartlink. `false` ainda envia header Referer |
+| `TUXLER_ENABLED` | `false` | bool | Windows: egress residencial via TuxlerVPN (gratuito); ignora `PROXY_*` |
+| `TUXLER_EXE` | *(padrão Tuxler)* | path | Caminho do `tuxlerVPN.exe` no Windows |
+| `TUXLER_ROTATE_TIMEOUT_MS` | `90000` | int | Timeout da rotação de IP (PowerShell) |
+| `PROXY_ENABLED` | `false` | bool | Proxy HTTP (opcional / pago). Desligado se `TUXLER_ENABLED=true` |
 | `PROXY_SERVER` | *(vazio)* | url | `http://user:pass@host:port` (obrigatório se enabled) |
 | `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`debug` | Nível de log |
 | `STEALTH_TIMEZONE` | `America/Sao_Paulo` | IANA | Fallback de timezone (se geo off/falhar) |
@@ -254,7 +257,7 @@ STRATEGY=directLink
 TARGET_URLS=https://exemplo.com/smartlink
 BROWSE_PAGES_MIN=1
 BROWSE_PAGES_MAX=3
-INCLUDE_REFERRER=false
+INCLUDE_REFERRER=true
 INTERVAL_MIN_SEC=30
 INTERVAL_MAX_SEC=60
 ```

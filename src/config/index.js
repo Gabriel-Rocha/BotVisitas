@@ -114,15 +114,21 @@ function loadConfig() {
       return 'light';
     })(),
 
+    tuxler: {
+      enabled: bool(process.env.TUXLER_ENABLED, false),
+      exePath: (process.env.TUXLER_EXE || '').trim() || null,
+      rotateTimeoutMs: int(process.env.TUXLER_ROTATE_TIMEOUT_MS, 90_000),
+    },
+
     proxy: {
       enabled: bool(process.env.PROXY_ENABLED, false),
       list: parseProxyList(process.env.PROXY_LIST || ''),
       server: (process.env.PROXY_SERVER || '').trim() || null,
       maxProxies: Math.min(int(process.env.PROXY_MAX, FREE_PLAN_MAX), FREE_PLAN_MAX),
       rotate: (process.env.PROXY_ROTATE || 'roundRobin').trim(),
-      // ISO-2: us,gb,ca,au,de — DataImpulse append __cr.xx no username
+      // ISO-2: us,gb,ca,au,de — gateway pago append __cr.xx no username (opcional)
       countries: (process.env.PROXY_COUNTRIES || process.env.PROXY_COUNTRY || '').trim(),
-      // true = recusa IPs marcados proxy/hosting (plano free Webshare quase todo falha)
+      // true = recusa IPs marcados proxy/hosting (Tuxler residencial: use false)
       skipFlagged: bool(process.env.PROXY_SKIP_FLAGGED, true),
       // se o pool inteiro for datacenter/anon, visita sem proxy em vez de disparar o site
       fallbackDirect: bool(process.env.PROXY_FALLBACK_DIRECT, true),
@@ -142,6 +148,10 @@ function loadConfig() {
 
     logLevel: (process.env.LOG_LEVEL || 'info').trim(),
   };
+
+  if (config.tuxler.enabled && config.proxy.enabled) {
+    config.proxy.enabled = false;
+  }
 
   const slots = parseWorkerSlots(config.workerSlots);
   if (slots.length) {

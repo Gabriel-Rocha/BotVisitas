@@ -67,7 +67,7 @@ Cada visita troca o **visitante inteiro** (fingerprint + cookies + proxy). O que
 
 `SESSION_PERSIST=true` volta ao modo “um usuário só” (debug).
 
-Proxy residencial/móvel continua sendo o que mais pesa na reputação de IP. Sem proxy, o IP é o da máquina.
+Proxy residencial/móvel (Tuxler gratuito no Windows ou gateway HTTP) continua sendo o que mais pesa na reputação de IP. Sem proxy/Tuxler, o IP é o da máquina.
 
 ## Multi-dispositivo
 
@@ -90,8 +90,8 @@ Fixture local opcional: `npm run test:server` + `TARGET_URLS=http://localhost:30
 
 Cada worker é um agente com perfil (`desktop` / `mobile` / `tablet`): viewport + UA + touch coerentes. Ver [`docs/01-arquitetura.md`](docs/01-arquitetura.md).
 
-`PROXY_ENABLED=true` e `PROXY_SERVER` / `PROXY_SERVERS` (lista). Sem persistência, a lista entra em rodízio a cada visitante.
-Ver `src/core/proxy.js`.
+`TUXLER_ENABLED=true` no **Windows** (TuxlerVPN residencial gratuito) ou `PROXY_ENABLED=true` com
+`PROXY_SERVER` / `PROXY_LIST`. Ver [`docs/09-proxies-webshare.md`](docs/09-proxies-webshare.md).
 
 ## Documentação
 

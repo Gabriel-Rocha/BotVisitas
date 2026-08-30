@@ -14,6 +14,19 @@
 /** Teto absoluto de workers/proxies paralelos (RAM + sticky ports). */
 const FREE_PLAN_MAX = 40;
 
+const TOR_SOCKS_PORTS = new Set(['9050', '9051', '9150']);
+
+function assertNotTorProxy(host, port) {
+  const h = String(host || '').toLowerCase();
+  const p = String(port || '');
+  const isLocal = h === '127.0.0.1' || h === 'localhost' || h === '::1';
+  if (isLocal && TOR_SOCKS_PORTS.has(p)) {
+    throw new Error(
+      'Tor SOCKS (127.0.0.1:9050/9150) não é suportado — use TUXLER_ENABLED=true no Windows'
+    );
+  }
+}
+
 function stripQuotes(s) {
   return String(s || '').trim().replace(/^['"]|['"]$/g, '');
 }
@@ -34,10 +47,12 @@ function parseProxyEntry(raw) {
     }
     const username = url.username ? decodeURIComponent(url.username) : null;
     const password = url.password ? decodeURIComponent(url.password) : null;
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+    assertNotTorProxy(url.hostname, port);
     return {
       protocol: url.protocol.replace(':', '') || 'http',
       host: url.hostname,
-      port: url.port || (url.protocol === 'https:' ? '443' : '80'),
+      port,
       username,
       password,
       label: `${url.hostname}:${url.port || '80'}`,
@@ -46,6 +61,7 @@ function parseProxyEntry(raw) {
 
   const parts = entry.split(':');
   if (parts.length === 2) {
+    assertNotTorProxy(parts[0], parts[1]);
     return {
       protocol: 'http',
       host: parts[0],
@@ -58,6 +74,7 @@ function parseProxyEntry(raw) {
   if (parts.length >= 4) {
     const [host, port, username, ...rest] = parts;
     const password = rest.join(':');
+    assertNotTorProxy(host, port);
     return {
       protocol: 'http',
       host,
@@ -189,7 +206,7 @@ function createProxyLease(pool) {
 }
 
 function getProxyLaunchArgs(selected) {
-  if (!selected) return [];
+  if (!selected || selected.isTuxler) return [];
   // Chromium: preferir host:port (sem scheme). DataImpulse e vários guias
   // recomendam isso; `https://` no proxy causa ERR_SSL_PROTOCOL_ERROR.
   // `http://host:port` também funciona na maioria dos casos, mas host:port é o mais seguro.

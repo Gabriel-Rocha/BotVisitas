@@ -10,6 +10,7 @@ const { createWorker } = require('./worker');
 const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices');
 const { sleep } = require('../utils/sleep');
 const { isFlaggedAnonymousIp, lookupGeoViaProxy, lookupGeo } = require('./geo');
+const { createTuxlerLease, assertTuxlerReady } = require('./tuxler');
 
 /**
  * Resolve quantos workers subir (quando DEVICE_MIX não define a contagem).
@@ -21,8 +22,9 @@ function resolveConcurrency(config, strategy, logger) {
   let n = Math.max(1, config.concurrency || 1);
   const needsBrowser = strategy.requiresBrowser !== false;
   const proxyOn = config.proxy?.enabled;
+  const tuxlerOn = config.tuxler?.enabled;
 
-  if (needsBrowser && !proxyOn) {
+  if (needsBrowser && !proxyOn && !tuxlerOn) {
     if (n > 1) {
       logger.warn(
         'CONCURRENCY>1 sem PROXY_ENABLED — forçando 1 worker (mesmo IP sem ganho).'
@@ -48,8 +50,11 @@ function resolveConcurrency(config, strategy, logger) {
 function resolveProxyCap(config, strategy) {
   const needsBrowser = strategy.requiresBrowser !== false;
   const proxyOn = config.proxy?.enabled;
+  const tuxlerOn = config.tuxler?.enabled;
 
-  if (needsBrowser && !proxyOn) return 1;
+  if (needsBrowser && !proxyOn && !tuxlerOn) return 1;
+
+  if (tuxlerOn) return null; // workers serializam no lease Tuxler; não truncar mix
 
   if (proxyOn) {
     const { pool } = buildProxyPool(config.proxy);
@@ -133,6 +138,7 @@ function createLoop({ config, strategy, logger }) {
 
   async function run() {
     assertProxyReady(config.proxy, logger);
+    assertTuxlerReady(config, logger);
 
     const proxyCap = resolveProxyCap(config, strategy);
     const fallbackConcurrency = resolveConcurrency(config, strategy, logger);
@@ -153,8 +159,14 @@ function createLoop({ config, strategy, logger }) {
 
     deviceSummary = summarizeDevices(types);
 
-    let effectiveProxyOn = Boolean(config.proxy?.enabled);
-    if (config.proxy?.enabled && strategy.requiresBrowser !== false) {
+    let effectiveProxyOn = Boolean(config.proxy?.enabled || config.tuxler?.enabled);
+
+    if (config.tuxler?.enabled && strategy.requiresBrowser !== false) {
+      proxyLease = createTuxlerLease(config, logger);
+      logger.info(
+        `Tuxler: ${types.length} worker(s) — 1 IP por vez; rotação ao adquirir lease (IP diferente por rodada)`
+      );
+    } else if (config.proxy?.enabled && strategy.requiresBrowser !== false) {
       const selected = await selectUsableProxyPool(config, logger);
       if (selected.usedDirect) {
         effectiveProxyOn = false;

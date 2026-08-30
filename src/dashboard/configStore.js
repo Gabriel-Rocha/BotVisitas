@@ -18,6 +18,7 @@ const EDITABLE_KEYS = [
   'BROWSER_RESTART_EVERY',
   'HEADLESS',
   'PROXY_ENABLED',
+  'TUXLER_ENABLED',
   'TARGET_URLS',
   'BROWSE_PAGES_MIN',
   'BROWSE_PAGES_MAX',
@@ -62,10 +63,11 @@ function getSafeConfig() {
     BROWSER_RESTART_EVERY: get('BROWSER_RESTART_EVERY', '20'),
     HEADLESS: get('HEADLESS', 'true'),
     PROXY_ENABLED: get('PROXY_ENABLED', 'false'),
+    TUXLER_ENABLED: get('TUXLER_ENABLED', 'false'),
     TARGET_URLS: get('TARGET_URLS', ''),
     BROWSE_PAGES_MIN: get('BROWSE_PAGES_MIN', '0'),
     BROWSE_PAGES_MAX: get('BROWSE_PAGES_MAX', '0'),
-    INCLUDE_REFERRER: get('INCLUDE_REFERRER', 'false'),
+    INCLUDE_REFERRER: get('INCLUDE_REFERRER', 'true'),
     BANDWIDTH_SAVER: get('BANDWIDTH_SAVER', 'light'),
     PROXY_LIST_MASKED: proxyCount
       ? `${proxyCount} proxies configurados (ocultos)`

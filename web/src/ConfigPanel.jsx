@@ -70,6 +70,19 @@ export default function ConfigPanel({ config, busy, onChange, onSave }) {
           </select>
         </div>
         <div className="field">
+          <label>TUXLER_ENABLED (Windows)</label>
+          <select
+            value={config.TUXLER_ENABLED || 'false'}
+            onChange={(e) => onChange('TUXLER_ENABLED', e.target.value)}
+          >
+            <option value="true">true (Tuxler residencial gratuito)</option>
+            <option value="false">false</option>
+          </select>
+          <p className="muted">
+            true = VPN Tuxler no Windows; PROXY_* pago é ignorado. 1 IP por vez; rotação por worker.
+          </p>
+        </div>
+        <div className="field">
           <label>PROXY_ENABLED</label>
           <select
             value={config.PROXY_ENABLED}
@@ -99,9 +112,12 @@ export default function ConfigPanel({ config, busy, onChange, onSave }) {
             value={config.INCLUDE_REFERRER}
             onChange={(e) => onChange('INCLUDE_REFERRER', e.target.value)}
           >
-            <option value="true">true</option>
-            <option value="false">false</option>
+            <option value="true">true (entrada via Google/Bing)</option>
+            <option value="false">false (só header Referer)</option>
           </select>
+          <p className="muted">
+            true = warmup no buscador da geo. false = ainda envia Referer, sem visitar o Google.
+          </p>
         </div>
         <p className="muted">{config.PROXY_LIST_MASKED}</p>
         <button type="submit" className="primary" disabled={busy}>
