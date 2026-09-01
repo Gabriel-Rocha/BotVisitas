@@ -43,6 +43,7 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     ? await getTuxlerLaunchArgs(logger, config)
     : getProxyLaunchArgs(activeProxy);
 
+  const processLimit = Math.max(1, config.chromeProcessLimit || 1);
   const args = [
     '--disable-dev-shm-usage',
     '--no-sandbox',
@@ -50,6 +51,16 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     '--disable-popup-blocking',
     '--disable-notifications',
     '--ignore-certificate-errors',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-extensions',
+    '--disable-component-update',
+    '--metrics-recording-only',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--mute-audio',
+    `--renderer-process-limit=${processLimit}`,
     ...getStealthLaunchArgs({ lang: stealthOpts.lang }),
     ...proxyArgs,
   ];

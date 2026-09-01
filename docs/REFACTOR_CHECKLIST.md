@@ -98,6 +98,7 @@
 - [x] Dwell 5–9s antes do CTR e 3–6s depois
 - [x] TuxlerVPN (Windows): rotação residencial gratuita por worker (mutex + PowerShell)
 - [x] Tor SOCKS bloqueado (9050/9150)
+- [x] Watchdog de RAM + restart periódico do Chromium (anti OOM overnight)
 
 ---
 

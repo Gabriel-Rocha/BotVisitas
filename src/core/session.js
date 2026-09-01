@@ -19,7 +19,24 @@ async function createSession(
   device = null,
   preResolvedLocale = null
 ) {
+  const pages = await browser.pages().catch(() => []);
+  for (const extra of pages) {
+    try {
+      const extraUrl = extra.url();
+      if (extraUrl === 'about:blank' && pages.length === 1) {
+        await extra.close().catch(() => {});
+      } else if (extraUrl !== 'about:blank') {
+        await extra.close().catch(() => {});
+      }
+    } catch {
+      // popup órfão
+    }
+  }
+
   const page = await browser.newPage();
+  page.on('popup', (popup) => {
+    popup.close().catch(() => {});
+  });
 
   let viewport;
   let userAgent;

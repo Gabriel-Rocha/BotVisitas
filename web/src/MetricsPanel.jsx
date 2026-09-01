@@ -142,6 +142,18 @@ export default function MetricsPanel({ status }) {
           <div className="value">{workers.length}</div>
         </div>
         <div className="metric">
+          <div className="label">RAM livre</div>
+          <div className="value value-sm">
+            {stats.memory
+              ? `${stats.memory.freeMb} / ${stats.memory.totalMb} MB`
+              : '—'}
+          </div>
+        </div>
+        <div className="metric">
+          <div className="label">Reciclagens</div>
+          <div className="value">{stats.browserRestarts ?? 0}</div>
+        </div>
+        <div className="metric">
           <div className="label">Targets</div>
           <div className="value">{status.targetUrls?.length || 0}</div>
         </div>

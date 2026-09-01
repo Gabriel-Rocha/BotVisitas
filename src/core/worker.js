@@ -34,6 +34,7 @@ function createWorker({
     intermediate: 0,
     errors: 0,
     clicks: 0,
+    browserRestarts: 0,
     proxyLabel: null,
     timezoneId: null,
     locale: null,
@@ -48,6 +49,7 @@ function createWorker({
   let abortController = null;
   let captureInProgress = null;
   let lastPreview = null;
+  let recycleRequested = null;
 
   function log(level, ...args) {
     logger[level](prefix, ...args);
@@ -141,20 +143,23 @@ function createWorker({
     );
   }
 
-  async function restartBrowserWithNewProxy() {
+  async function recycleBrowser(reason = 'periódico') {
     if (!needsBrowser) return;
 
-    log('info', `Restart periódico (#${stats.iterations})`);
+    log('info', `Reciclando Chromium (${reason}) #${stats.iterations}`);
     await closeBrowser(browser, {
       info: (...a) => log('info', ...a),
       warn: (...a) => log('warn', ...a),
+      debug: (...a) => log('debug', ...a),
     });
     browser = null;
     page = null;
+    lastPreview = null;
 
-    releaseProxy();
-
-    if (proxyLease) {
+    const tuxlerSkip =
+      config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
+    if (proxyLease && !tuxlerSkip) {
+      releaseProxy();
       try {
         await acquireUsableProxy();
       } catch (err) {
@@ -164,7 +169,12 @@ function createWorker({
       }
     }
 
+    stats.browserRestarts += 1;
     await ensureBrowser();
+  }
+
+  async function restartBrowserWithNewProxy() {
+    await recycleBrowser('periódico');
   }
 
   async function maybeRestartBrowser() {
@@ -172,7 +182,16 @@ function createWorker({
     const every = config.browserRestartEvery;
     if (!every || every <= 0) return;
     if (stats.iterations === 0 || stats.iterations % every !== 0) return;
-    await restartBrowserWithNewProxy();
+    await recycleBrowser('periódico');
+  }
+
+  async function forceRecycleBrowser(reason = 'watchdog-ram') {
+    if (!needsBrowser) return;
+    recycleRequested = reason;
+    if (!page || page.isClosed()) {
+      recycleRequested = null;
+      await recycleBrowser(reason);
+    }
   }
 
   async function releaseTuxlerTurn() {
@@ -248,6 +267,13 @@ function createWorker({
     }
 
     stats.iterations += 1;
+
+    if (recycleRequested) {
+      const reason = recycleRequested;
+      recycleRequested = null;
+      await recycleBrowser(reason);
+      return;
+    }
 
     // Fila só quando Tuxler rotaciona IP entre workers (restart/coords).
     const tuxlerRotates = (config.tuxler?.rotateMode || 'skip').toLowerCase() !== 'skip';
@@ -444,7 +470,7 @@ function createWorker({
     };
   }
 
-  return { workerId, run, stop, getStats, capturePreview };
+  return { workerId, run, stop, getStats, capturePreview, forceRecycleBrowser };
 }
 
 module.exports = { createWorker };

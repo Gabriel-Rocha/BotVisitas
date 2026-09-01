@@ -72,7 +72,10 @@ function loadConfig() {
 
     intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 5),
     intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 12),
-    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 20),
+    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 25),
+    chromeProcessLimit: int(process.env.CHROME_PROCESS_LIMIT, 1),
+    memoryWarnPct: float(process.env.MEMORY_WARN_PCT, 0.82),
+    memoryCriticalPct: float(process.env.MEMORY_CRITICAL_PCT, 0.9),
     concurrency: int(process.env.CONCURRENCY, 5),
 
     deviceMix: (process.env.DEVICE_MIX || '').trim(),

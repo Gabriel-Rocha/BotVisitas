@@ -68,9 +68,12 @@ function publicStatusSnapshot(config, loop, running) {
           intermediate: stats.intermediate || 0,
           errors: stats.errors,
           iterations: stats.iterations,
+          clicks: stats.clicks || 0,
+          browserRestarts: stats.browserRestarts || 0,
           uptimeSec: stats.uptimeSec,
           concurrency: stats.concurrency,
           devices: stats.devices || {},
+          memory: stats.memory || null,
           workers: (stats.workers || []).map((w) => ({
             workerId: w.workerId,
             deviceType: w.deviceType || 'desktop',

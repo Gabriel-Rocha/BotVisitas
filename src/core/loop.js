@@ -6,6 +6,7 @@ const { sleep } = require('../utils/sleep');
 const { createTuxlerLease, assertTuxlerReady, validateTuxlerActive } = require('./tuxler');
 const { FREE_PLAN_MAX, resetTuxlerSocksCache } = require('./proxy');
 const { clearGeoCache } = require('./geo');
+const { createMemoryWatch } = require('./memoryWatch');
 
 function resolveConcurrency(config, strategy, logger) {
   const n = Math.max(1, Math.min(config.concurrency || 1, FREE_PLAN_MAX));
@@ -60,6 +61,33 @@ function createLoop({ config, strategy, logger }) {
   const startedAt = Date.now();
   let deviceSummary = {};
   const previewGate = createPreviewGate(2);
+  let recycleInFlight = null;
+  const memoryWatch = createMemoryWatch({
+    logger,
+    warnPct: config.memoryWarnPct ?? 0.82,
+    criticalPct: config.memoryCriticalPct ?? 0.9,
+    intervalMs: 20_000,
+    onCritical: () => recycleAllBrowsers('watchdog-ram'),
+  });
+
+  async function recycleAllBrowsers(reason = 'watchdog-ram') {
+    if (stopping || !workers.length) return;
+    if (recycleInFlight) return recycleInFlight;
+    recycleInFlight = (async () => {
+      logger.warn(`Reciclando ${workers.length} Chromium(s) — ${reason}`);
+      for (const worker of workers) {
+        try {
+          await worker.forceRecycleBrowser(reason);
+        } catch (err) {
+          logger.warn(`Falha ao reciclar w${worker.workerId}:`, err.message);
+        }
+        await sleep(400);
+      }
+    })().finally(() => {
+      recycleInFlight = null;
+    });
+    return recycleInFlight;
+  }
 
   async function run() {
     assertTuxlerReady(config, logger);
@@ -96,8 +124,14 @@ function createLoop({ config, strategy, logger }) {
       .join(', ');
 
     logger.info(
-      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | tuxler=${Boolean(config.tuxler?.enabled && proxyLease)}`
+      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | tuxler=${Boolean(config.tuxler?.enabled && proxyLease)} | restartEvery=${config.browserRestartEvery || 0}`
     );
+    if (process.platform === 'win32') {
+      logger.info(
+        'Overnight Windows: pause atualizações ativas (Configurações → Windows Update → Pausar) para o PC não reiniciar sozinho.'
+      );
+    }
+    memoryWatch.start();
 
     for (let i = 0; i < types.length; i += 1) {
       const { type, profile } = getProfile(config.deviceProfiles, types[i]);
@@ -135,6 +169,7 @@ function createLoop({ config, strategy, logger }) {
   async function stop() {
     if (stopping) return;
     stopping = true;
+    memoryWatch.stop();
     logger.info('Encerrando workers...', JSON.stringify(getStats()));
     await Promise.race([
       Promise.all(workers.map((w) => w.stop())),
@@ -155,7 +190,9 @@ function createLoop({ config, strategy, logger }) {
       errors: parts.reduce((s, p) => s + p.errors, 0),
       clicks: parts.reduce((s, p) => s + (p.clicks || 0), 0),
       iterations: parts.reduce((s, p) => s + p.iterations, 0),
+      browserRestarts: parts.reduce((s, p) => s + (p.browserRestarts || 0), 0),
       devices: deviceSummary,
+      memory: memoryWatch.getSnapshot(),
       workers: parts,
     };
   }
