@@ -28,6 +28,7 @@ export default function App() {
     strategy: 'dryRun',
     concurrency: 5,
     proxyEnabled: false,
+    tuxlerEnabled: true,
     proxyLabels: [],
     stats: emptyMetrics,
   });
@@ -106,8 +107,16 @@ export default function App() {
     setBusy(true);
     setError('');
     try {
-      // Start/Restart enviam os links colados (runtime, não gravam no .env).
-      // Stop não precisa de body.
+      if (action !== 'stop') {
+        const strategy = configRef.current?.STRATEGY || status.strategy;
+        const urls = String(targetLinks || '')
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (strategy === 'directLink' && !urls.length) {
+          throw new Error('Cole pelo menos um link de destino antes de iniciar.');
+        }
+      }
       const body =
         action === 'stop' ? undefined : { targetUrls: targetLinks };
       await botAction(action, body);
@@ -128,13 +137,12 @@ export default function App() {
       CONCURRENCY: source.CONCURRENCY,
       DEVICE_MIX: source.DEVICE_MIX,
       WORKER_SLOTS: source.WORKER_SLOTS || '',
-      PROXY_MAX: source.PROXY_MAX,
       PROXY_COUNTRIES: source.PROXY_COUNTRIES || '',
       INTERVAL_MIN_SEC: source.INTERVAL_MIN_SEC,
       INTERVAL_MAX_SEC: source.INTERVAL_MAX_SEC,
       BROWSER_RESTART_EVERY: source.BROWSER_RESTART_EVERY,
       HEADLESS: source.HEADLESS,
-      PROXY_ENABLED: source.PROXY_ENABLED,
+      TUXLER_ENABLED: source.TUXLER_ENABLED,
       BROWSE_PAGES_MIN: source.BROWSE_PAGES_MIN,
       BROWSE_PAGES_MAX: source.BROWSE_PAGES_MAX,
       INCLUDE_REFERRER: source.INCLUDE_REFERRER,
@@ -183,7 +191,7 @@ export default function App() {
           <h1 className="brand">
             Bot<span>Visitas</span>
           </h1>
-          <p className="tagline">Console de operação — workers, proxies e logs</p>
+          <p className="tagline">Console de operação — workers, Tuxler e logs</p>
         </div>
         <div className="status-pill">
           <span className={`dot ${running ? 'on' : 'off'}`} />
@@ -236,9 +244,9 @@ export default function App() {
       <section className="panel target-links">
         <h2>Links de destino</h2>
         <p className="muted">
-          Cole um link por linha (ou separados por vírgula). Valem só para esta
-          execução — <strong>não são gravados no .env</strong>. Vazio = usa o
-          <code> TARGET_URLS</code> do .env como fallback.
+          Cole um link por linha (ou separados por vírgula). Os links valem só para
+          esta execução — <strong>não são gravados no .env</strong>. O Start exige
+          pelo menos um link quando <code>STRATEGY=directLink</code>.
         </p>
         <textarea
           className="links-area"
@@ -313,9 +321,8 @@ export default function App() {
             <p className="muted">Carregando workers…</p>
           )}
           <p className="muted" style={{ marginTop: '0.75rem' }}>
-            strategy={status.strategy} · concurrency={status.concurrency} · proxy=
-            {status.proxyEnabled ? 'on' : 'off'} · pool=
-            {status.proxyPoolSize ?? 0}
+            strategy={status.strategy} · concurrency={status.concurrency} · tuxler=
+            {status.tuxlerEnabled ? 'on' : 'off'}
             {stats.devices && Object.keys(stats.devices).length
               ? ` · devices=${Object.entries(stats.devices)
                   .map(([k, v]) => `${k}:${v}`)

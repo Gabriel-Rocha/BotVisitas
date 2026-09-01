@@ -1,104 +1,16 @@
 'use strict';
 
-/**
- * Proxies — lista (Webshare etc.) ou gateway (DataImpulse).
- * Formatos aceitos por entrada:
- *   http://user:pass@host:port
- *   host:port:user:pass          (export típico Webshare)
- *   host:port
- *
- * Chromium: --proxy-server SEM credenciais + page.authenticate().
- * Workers: acquire/release exclusivo (1 proxy = 1 browser por vez).
- */
+const net = require('net');
+const { execSync } = require('child_process');
+const { sleep } = require('../utils/sleep');
 
-/** Teto absoluto de workers/proxies paralelos (RAM + sticky ports). */
+/** Teto de workers paralelos (RAM + lease Tuxler serializado). */
 const FREE_PLAN_MAX = 40;
 
-const TOR_SOCKS_PORTS = new Set(['9050', '9051', '9150']);
+const DEFAULT_TUXLER_SOCKS = { host: '127.0.0.1', port: 23321 };
 
-function assertNotTorProxy(host, port) {
-  const h = String(host || '').toLowerCase();
-  const p = String(port || '');
-  const isLocal = h === '127.0.0.1' || h === 'localhost' || h === '::1';
-  if (isLocal && TOR_SOCKS_PORTS.has(p)) {
-    throw new Error(
-      'Tor SOCKS (127.0.0.1:9050/9150) não é suportado — use TUXLER_ENABLED=true no Windows'
-    );
-  }
-}
-
-function stripQuotes(s) {
-  return String(s || '').trim().replace(/^['"]|['"]$/g, '');
-}
-
-/**
- * @returns {{ protocol: string, host: string, port: string, username: string|null, password: string|null, label: string }}
- */
-function parseProxyEntry(raw) {
-  const entry = stripQuotes(raw);
-  if (!entry) return null;
-
-  if (/^[a-z]+:\/\//i.test(entry)) {
-    let url;
-    try {
-      url = new URL(entry);
-    } catch {
-      throw new Error(`Proxy inválido (URL): ${entry}`);
-    }
-    const username = url.username ? decodeURIComponent(url.username) : null;
-    const password = url.password ? decodeURIComponent(url.password) : null;
-    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
-    assertNotTorProxy(url.hostname, port);
-    return {
-      protocol: url.protocol.replace(':', '') || 'http',
-      host: url.hostname,
-      port,
-      username,
-      password,
-      label: `${url.hostname}:${url.port || '80'}`,
-    };
-  }
-
-  const parts = entry.split(':');
-  if (parts.length === 2) {
-    assertNotTorProxy(parts[0], parts[1]);
-    return {
-      protocol: 'http',
-      host: parts[0],
-      port: parts[1],
-      username: null,
-      password: null,
-      label: `${parts[0]}:${parts[1]}`,
-    };
-  }
-  if (parts.length >= 4) {
-    const [host, port, username, ...rest] = parts;
-    const password = rest.join(':');
-    assertNotTorProxy(host, port);
-    return {
-      protocol: 'http',
-      host,
-      port,
-      username,
-      password,
-      label: `${host}:${port}`,
-    };
-  }
-
-  throw new Error(
-    `Proxy inválido: "${entry}". Use http://user:pass@host:port ou host:port:user:pass`
-  );
-}
-
-function parseProxyList(raw) {
-  if (!raw || !String(raw).trim()) return [];
-  return String(raw)
-    .split(/[\n,]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map(parseProxyEntry)
-    .filter(Boolean);
-}
+/** @type {{ open: boolean, host: string, port: number, proxyUrl: string|null, source: string, at: number }|null} */
+let cachedSocksState = null;
 
 function parseCountryList(raw) {
   if (!raw || !String(raw).trim()) return [];
@@ -108,157 +20,222 @@ function parseCountryList(raw) {
     .filter((s) => /^[a-z]{2}$/.test(s));
 }
 
-/**
- * DataImpulse: país no username → login__cr.us
- * Não duplica se já houver __cr.xx no login.
- */
-function withCountryTarget(username, countryCode) {
-  if (!username || !countryCode) return username;
-  const cc = String(countryCode).toLowerCase();
-  if (/__cr\.[a-z]{2}/i.test(username)) return username;
-  return `${username}__cr.${cc}`;
+/** Proxy HTTP explícito (legado) — vazio por padrão. */
+function getProxyLaunchArgs(_selected) {
+  return [];
 }
 
-function buildProxyPool(proxyConfig) {
-  const max = Math.min(
-    Math.max(1, proxyConfig.maxProxies || FREE_PLAN_MAX),
-    FREE_PLAN_MAX
-  );
-
-  const countries = parseCountryList(proxyConfig.countries || '');
-
-  let pool = [];
-  if (proxyConfig.list?.length) {
-    pool = proxyConfig.list.map((entry, i) => {
-      const clone = { ...entry };
-      if (countries.length && clone.username) {
-        const cc = countries[i % countries.length];
-        clone.username = withCountryTarget(clone.username, cc);
-        clone.country = cc;
-        clone.label = `${clone.label || `${clone.host}:${clone.port}`}|${cc}`;
-      }
-      return clone;
-    });
-  } else if (proxyConfig.server) {
-    // Gateway rotativo (DataImpulse, Zyte, etc.): N slots = até PROXY_MAX workers.
-    const entry = parseProxyEntry(proxyConfig.server);
-    const stickyBase =
-      /dataimpulse\.com$/i.test(entry.host) && Number(entry.port) === 823
-        ? 10000 // DataImpulse sticky 10000–20000 (evita 2 workers no mesmo IP rotativo)
-        : null;
-    pool = Array.from({ length: max }, (_, i) => {
-      const clone = { ...entry };
-      if (stickyBase != null) {
-        clone.port = String(stickyBase + i);
-        clone.label = `${clone.host}:${clone.port}`;
-      }
-      if (countries.length && clone.username) {
-        const cc = countries[i % countries.length];
-        clone.username = withCountryTarget(clone.username, cc);
-        clone.country = cc;
-        clone.label = `${clone.label}|${cc}`;
-      }
-      return clone;
-    });
+function readWindowsSystemProxy() {
+  if (process.platform !== 'win32') {
+    return { enabled: false, server: null };
   }
-
-  if (pool.length > max) {
-    pool = pool.slice(0, max);
+  try {
+    const script =
+      "$p = Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; " +
+      '[pscustomobject]@{ enable = [int]$p.ProxyEnable; server = [string]$p.ProxyServer } | ConvertTo-Json -Compress';
+    const raw = execSync(`powershell -NoProfile -Command "${script}"`, {
+      encoding: 'utf8',
+      timeout: 8000,
+      windowsHide: true,
+    }).trim();
+    const data = JSON.parse(raw);
+    return {
+      enabled: Boolean(Number(data.enable)),
+      server: String(data.server || '').trim() || null,
+    };
+  } catch {
+    return { enabled: false, server: null };
   }
-
-  return { pool, max, countries };
 }
 
-/**
- * Lease exclusivo: enquanto um worker segura o proxy, outro não o usa.
- */
-function createProxyLease(pool) {
-  const available = [...pool];
-  const leased = new Set();
-
-  return {
-    size: pool.length,
-    availableCount() {
-      return available.length;
-    },
-    acquire(preferredCountry) {
-      if (!available.length) {
-        throw new Error('Nenhuma proxy livre no pool (todas em uso)');
-      }
-      const want = String(preferredCountry || '').toLowerCase();
-      let index = 0;
-      if (want) {
-        const found = available.findIndex(
-          (item) => String(item.country || '').toLowerCase() === want
-        );
-        if (found >= 0) index = found;
-      }
-      const proxy = available.splice(index, 1)[0];
-      leased.add(proxy);
-      return proxy;
-    },
-    release(proxy) {
-      if (!proxy || !leased.has(proxy)) return;
-      leased.delete(proxy);
-      available.push(proxy);
-    },
-  };
-}
-
-function getProxyLaunchArgs(selected) {
-  if (!selected || selected.isTuxler) return [];
-  // Chromium: preferir host:port (sem scheme). DataImpulse e vários guias
-  // recomendam isso; `https://` no proxy causa ERR_SSL_PROTOCOL_ERROR.
-  // `http://host:port` também funciona na maioria dos casos, mas host:port é o mais seguro.
-  const args = [`--proxy-server=${selected.host}:${selected.port}`];
-  if (/dataimpulse\.com$/i.test(selected.host)) {
-    args.push('--disable-quic');
+function normalizeProxyUrl(raw) {
+  if (!raw) return null;
+  let value = String(raw).trim();
+  if (!value) return null;
+  if (/^socks=/i.test(value)) {
+    value = value.replace(/^socks=/i, 'socks5://');
   }
-  return args;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    value = `http://${value}`;
+  }
+  return value;
 }
 
-async function applyProxyAuth(page, selected) {
-  if (!selected?.username) return;
-  await page.authenticate({
-    username: selected.username,
-    password: selected.password || '',
+function parseProxyEndpoint(proxyUrl) {
+  try {
+    const url = new URL(proxyUrl);
+    return {
+      host: url.hostname,
+      port: Number(url.port) || (url.protocol === 'https:' ? 443 : 80),
+      proxyUrl,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isLocalPortOpen(host, port, timeoutMs = 900) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port, timeout: timeoutMs });
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      try {
+        socket.destroy();
+      } catch {
+        // ignore
+      }
+      resolve(value);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+    socket.once('timeout', () => finish(false));
   });
 }
 
-function assertProxyReady(proxyConfig, logger) {
-  if (!proxyConfig?.enabled) {
-    logger.debug('Proxy desabilitado.');
-    return;
+/**
+ * Resolve endpoint SOCKS do Tuxler (Windows proxy ou env).
+ */
+function resolveTuxlerSocksEndpoint(config = {}) {
+  const envHost = (process.env.TUXLER_SOCKS_HOST || config.tuxler?.socksHost || '').trim();
+  const envPort = Number.parseInt(process.env.TUXLER_SOCKS_PORT || config.tuxler?.socksPort || '', 10);
+
+  if (envHost && Number.isFinite(envPort) && envPort > 0) {
+    return {
+      host: envHost,
+      port: envPort,
+      proxyUrl: `socks5://${envHost}:${envPort}`,
+      source: 'env',
+    };
   }
 
-  const { pool, max, countries } = buildProxyPool(proxyConfig);
-  if (!pool.length) {
-    throw new Error(
-      'PROXY_ENABLED=true mas nenhuma proxy configurada (PROXY_LIST ou PROXY_SERVER)'
+  const { enabled, server } = readWindowsSystemProxy();
+  if (enabled && server) {
+    const proxyUrl = normalizeProxyUrl(server);
+    const endpoint = parseProxyEndpoint(proxyUrl);
+    if (endpoint && /^socks/i.test(proxyUrl)) {
+      return { ...endpoint, source: 'windows-proxy' };
+    }
+  }
+
+  return {
+    host: DEFAULT_TUXLER_SOCKS.host,
+    port: DEFAULT_TUXLER_SOCKS.port,
+    proxyUrl: `socks5://${DEFAULT_TUXLER_SOCKS.host}:${DEFAULT_TUXLER_SOCKS.port}`,
+    source: 'default',
+  };
+}
+
+async function probeTuxlerSocks(config = {}, logger = null) {
+  const endpoint = resolveTuxlerSocksEndpoint(config);
+  const open = await isLocalPortOpen(endpoint.host, endpoint.port, 1200);
+  const state = {
+    open,
+    host: endpoint.host,
+    port: endpoint.port,
+    proxyUrl: endpoint.proxyUrl,
+    source: endpoint.source,
+    at: Date.now(),
+  };
+  if (!open && logger?.debug) {
+    logger.debug(
+      `Tuxler SOCKS ${endpoint.host}:${endpoint.port} fechado (fonte=${endpoint.source})`
     );
   }
+  return state;
+}
 
-  if ((proxyConfig.list?.length || 0) > FREE_PLAN_MAX) {
+/**
+ * Aguarda o SOCKS local do Tuxler (127.0.0.1:23321) ficar online.
+ */
+async function waitForTuxlerSocks({ config = {}, logger = null, maxWaitMs = 20_000 } = {}) {
+  const deadline = Date.now() + Math.max(0, maxWaitMs);
+  let last = null;
+
+  while (Date.now() <= deadline) {
+    last = await probeTuxlerSocks(config, logger);
+    if (last.open) {
+      cachedSocksState = last;
+      if (logger) {
+        logger.info(
+          `Tuxler SOCKS online: ${last.proxyUrl} (fonte=${last.source}) — tráfego via VPN do app`
+        );
+      }
+      return last;
+    }
+    if (Date.now() >= deadline) break;
+    await sleep(1000);
+  }
+
+  cachedSocksState = last || {
+    open: false,
+    host: DEFAULT_TUXLER_SOCKS.host,
+    port: DEFAULT_TUXLER_SOCKS.port,
+    proxyUrl: null,
+    source: 'offline',
+    at: Date.now(),
+  };
+
+  if (logger) {
     logger.warn(
-      `PROXY_LIST tem mais de ${FREE_PLAN_MAX} entradas — usando só as ${max} primeiras (teto do pool).`
+      `Tuxler SOCKS offline (${cachedSocksState.host}:${cachedSocksState.port}) após ${maxWaitMs}ms — ` +
+        'Node/Chromium saem pelo IP LOCAL até reconectar o app (Abrir Tuxler → conectar país → aguardar proxy).'
+    );
+  }
+  return cachedSocksState;
+}
+
+async function ensureTuxlerSocks(config, logger, maxWaitMs = 0) {
+  if (cachedSocksState?.open && Date.now() - cachedSocksState.at < 30_000) {
+    return cachedSocksState;
+  }
+  if (maxWaitMs > 0) {
+    return waitForTuxlerSocks({ config, logger, maxWaitMs });
+  }
+  const state = await probeTuxlerSocks(config, logger);
+  cachedSocksState = state;
+  return state;
+}
+
+function resetTuxlerSocksCache() {
+  cachedSocksState = null;
+}
+
+/**
+ * Tuxler define proxy SOCKS no Windows (ex.: socks=127.0.0.1:23321).
+ * Só usa Chromium via SOCKS quando a porta local responde.
+ */
+async function getTuxlerLaunchArgs(logger, config = {}) {
+  const socks = await ensureTuxlerSocks(config, logger, 0);
+
+  if (socks.open && socks.proxyUrl) {
+    logger?.info?.(`Tuxler: Chromium via ${socks.proxyUrl}`);
+    return [`--proxy-server=${socks.proxyUrl}`];
+  }
+
+  if (config.tuxler?.requireActive !== false && config.tuxler?.enabled) {
+    throw new Error(
+      `Tuxler SOCKS ${socks.host}:${socks.port} offline — bot não deve rodar sem VPN (TUXLER_REQUIRE_ACTIVE=true)`
     );
   }
 
-  const geoLabel = countries?.length ? ` | countries=${countries.join(',')}` : '';
-  logger.info(
-    `Proxy ON | pool=${pool.length}/${max} | lease=exclusive | host=${pool[0]?.host || '?'}${geoLabel}`
+  logger?.warn?.(
+    `Tuxler: Chromium direct:// — SOCKS ${socks.host}:${socks.port} offline; visitas NÃO passam pela VPN do app`
   );
+  return ['--proxy-server=direct://'];
 }
 
 module.exports = {
   FREE_PLAN_MAX,
-  parseProxyEntry,
-  parseProxyList,
   parseCountryList,
-  withCountryTarget,
-  buildProxyPool,
-  createProxyLease,
   getProxyLaunchArgs,
-  applyProxyAuth,
-  assertProxyReady,
+  getTuxlerLaunchArgs,
+  readWindowsSystemProxy,
+  resolveTuxlerSocksEndpoint,
+  waitForTuxlerSocks,
+  ensureTuxlerSocks,
+  resetTuxlerSocksCache,
+  probeTuxlerSocks,
+  isLocalPortOpen,
 };

@@ -13,7 +13,7 @@ export default function ConfigPanel({ config, busy, onChange, onSave }) {
       <h2>Config</h2>
       <p className="muted">
         Ajustes avançados. Não aparece na Operação. Aplicam no próximo
-        Start/Restart.
+        Start/Restart. Links de destino só no painel Operação.
       </p>
       <form className="form" onSubmit={onSave}>
         <div className="field">
@@ -76,21 +76,11 @@ export default function ConfigPanel({ config, busy, onChange, onSave }) {
             onChange={(e) => onChange('TUXLER_ENABLED', e.target.value)}
           >
             <option value="true">true (Tuxler residencial gratuito)</option>
-            <option value="false">false</option>
+            <option value="false">false (IP local, 1 worker)</option>
           </select>
           <p className="muted">
-            true = VPN Tuxler no Windows; PROXY_* pago é ignorado. 1 IP por vez; rotação por worker.
+            Única fonte de egress. 1 IP por vez; rotação por worker via VPN do sistema.
           </p>
-        </div>
-        <div className="field">
-          <label>PROXY_ENABLED</label>
-          <select
-            value={config.PROXY_ENABLED}
-            onChange={(e) => onChange('PROXY_ENABLED', e.target.value)}
-          >
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
         </div>
         <div className="field">
           <label>BROWSE_PAGES_MIN</label>
@@ -119,7 +109,6 @@ export default function ConfigPanel({ config, busy, onChange, onSave }) {
             true = warmup no buscador da geo. false = ainda envia Referer, sem visitar o Google.
           </p>
         </div>
-        <p className="muted">{config.PROXY_LIST_MASKED}</p>
         <button type="submit" className="primary" disabled={busy}>
           Salvar no .env
         </button>

@@ -3,6 +3,7 @@
 const { createApp } = require('./routes');
 const { createBufferedLogger } = require('./bufferedLogger');
 const { initDb, closePool, logQueue } = require('../db');
+const { sleep } = require('../utils/sleep');
 // Garante reload do .env antes de ler DATABASE_URL
 require('../config');
 
@@ -15,10 +16,16 @@ const logger = createBufferedLogger('info');
 const app = createApp();
 
 let server = null;
+let shuttingDown = false;
 
 function publicDashboardUrl(host, port) {
   const openHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
   return `http://${openHost}:${port}`;
+}
+
+function hardExit(code, reason) {
+  logger.warn(reason);
+  setTimeout(() => process.exit(code), 300).unref();
 }
 
 function listen(port, attemptsLeft) {
@@ -52,15 +59,35 @@ async function boot() {
 }
 
 async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info(`Sinal ${signal} — encerrando dashboard`);
-  const botRuntime = require('./botRuntime');
-  await botRuntime.stop();
-  await logQueue.flush().catch(() => {});
-  await closePool();
-  if (server) {
-    server.close(() => process.exit(0));
-  } else {
-    process.exit(0);
+
+  const watchdog = setTimeout(() => {
+    hardExit(1, 'Shutdown demorou > 25s — encerramento forçado');
+  }, 25_000);
+  watchdog.unref();
+
+  try {
+    const botRuntime = require('./botRuntime');
+    await Promise.race([
+      botRuntime.stop(),
+      sleep(20_000).then(() => {
+        logger.warn('botRuntime.stop() demorou > 20s — continuando shutdown');
+      }),
+    ]);
+    await logQueue.flush().catch(() => {});
+    await closePool();
+  } catch (err) {
+    logger.error('Erro no shutdown:', err.message);
+  } finally {
+    clearTimeout(watchdog);
+    if (server) {
+      server.close(() => process.exit(0));
+      hardExit(0, 'server.close() lento — saindo');
+    } else {
+      process.exit(0);
+    }
   }
 }
 

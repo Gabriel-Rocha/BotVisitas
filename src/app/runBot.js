@@ -3,7 +3,6 @@
 const { loadConfig } = require('../config');
 const { resolveStrategy } = require('../strategies');
 const { createLoop } = require('../core/loop');
-const { buildProxyPool } = require('../core/proxy');
 const { createBufferedLogger } = require('../dashboard/bufferedLogger');
 
 /**
@@ -12,30 +11,37 @@ const { createBufferedLogger } = require('../dashboard/bufferedLogger');
  */
 function createBotSession({ logger, overrides = {} } = {}) {
   const config = loadConfig();
+  const strategy = resolveStrategy(config.strategy);
 
-  // Links colados no painel valem só para esta execução (não vão pro .env).
-  // Vazio/ausente = usa TARGET_URLS do .env como fallback.
-  if (Array.isArray(overrides.targetUrls) && overrides.targetUrls.length) {
-    config.targetUrls = overrides.targetUrls;
+  const portalUrls = Array.isArray(overrides.targetUrls)
+    ? overrides.targetUrls.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+
+  if (strategy.name === 'directLink') {
+    if (!portalUrls.length) {
+      throw new Error(
+        'Cole os links de destino no painel e clique Start (URLs não vêm do .env).'
+      );
+    }
+    config.targetUrls = portalUrls;
     config.targetSource = 'frontend';
   } else {
-    config.targetSource = config.targetUrls.length ? 'env' : 'none';
+    config.targetUrls = portalUrls;
+    config.targetSource = portalUrls.length ? 'frontend' : 'none';
   }
 
   const log = logger || createBufferedLogger(config.logLevel);
-  const strategy = resolveStrategy(config.strategy);
 
   log.info('BotVisitas — session start');
   log.info(
-    `strategy=${config.strategy} | headless=${config.headless} | proxy=${config.proxy.enabled} | concurrency=${config.concurrency}`
+    `strategy=${config.strategy} | headless=${config.headless} | tuxler=${Boolean(config.tuxler?.enabled)} | concurrency=${config.concurrency}`
   );
   if (config.deviceMix) {
     log.info(`DEVICE_MIX=${config.deviceMix}`);
   }
   log.info(
-    `TARGET_URLS [${config.targetSource}] (${config.targetUrls.length}): ${
-      config.targetUrls.length ? config.targetUrls.join(' | ') : '(vazio)'
-    }`
+    `Links [${config.targetSource}] (${config.targetUrls.length}): ${
+      config.targetUrls.length ? config.targetUrls.join(' | ') : '(nenhum — dryRun OK)'}`
   );
 
   const loop = createLoop({ config, strategy, logger: log });
@@ -45,9 +51,6 @@ function createBotSession({ logger, overrides = {} } = {}) {
 
 function publicStatusSnapshot(config, loop, running) {
   const stats = loop ? loop.getStats() : null;
-  const proxyPool = config.proxy?.enabled
-    ? buildProxyPool(config.proxy).pool.map((p) => p.label)
-    : [];
 
   return {
     running: Boolean(running),
@@ -55,14 +58,14 @@ function publicStatusSnapshot(config, loop, running) {
     headless: config.headless,
     concurrency: config.concurrency,
     deviceMix: config.deviceMix || '',
-    proxyEnabled: Boolean(config.proxy?.enabled),
-    proxyPoolSize: proxyPool.length,
-    proxyLabels: proxyPool,
+    tuxlerEnabled: Boolean(config.tuxler?.enabled),
     targetUrls: config.targetUrls || [],
-    targetSource: config.targetSource || (config.targetUrls?.length ? 'env' : 'none'),
+    targetSource: config.targetSource || 'none',
     stats: stats
       ? {
           ok: stats.ok,
+          offers: stats.offers || 0,
+          intermediate: stats.intermediate || 0,
           errors: stats.errors,
           iterations: stats.iterations,
           uptimeSec: stats.uptimeSec,
@@ -72,6 +75,8 @@ function publicStatusSnapshot(config, loop, running) {
             workerId: w.workerId,
             deviceType: w.deviceType || 'desktop',
             ok: w.ok,
+            offers: w.offers || 0,
+            intermediate: w.intermediate || 0,
             errors: w.errors,
             iterations: w.iterations,
             proxyLabel: w.proxyLabel,

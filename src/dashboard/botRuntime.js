@@ -4,7 +4,10 @@ const { createBotSession, publicStatusSnapshot } = require('../app/runBot');
 const { createBufferedLogger } = require('./bufferedLogger');
 const { loadConfig } = require('../config');
 const { getSafeConfig } = require('./configStore');
+const { resolveStrategy } = require('../strategies');
+const { validateTuxlerActive } = require('../core/tuxler');
 const logBuffer = require('./logBuffer');
+const { sleep } = require('../utils/sleep');
 const {
   createRun,
   finishRun,
@@ -111,17 +114,43 @@ async function start(options = {}) {
     return { ok: false, error: 'Bot já está em execução' };
   }
 
-  // Só sobrescreve a lista em memória se o campo veio no request.
   if (options && Object.prototype.hasOwnProperty.call(options, 'targetUrls')) {
     runtimeTargetUrls = normalizeUrls(options.targetUrls);
   }
 
-  config = loadConfig();
+  const previewConfig = loadConfig();
+  if (
+    previewConfig.strategy === 'directLink' &&
+    !runtimeTargetUrls.length
+  ) {
+    return {
+      ok: false,
+      error: 'Cole pelo menos um link de destino no painel antes de iniciar.',
+    };
+  }
+
+  config = previewConfig;
   logger = createBufferedLogger(config.logLevel);
-  const session = createBotSession({
-    logger,
-    overrides: { targetUrls: runtimeTargetUrls },
-  });
+
+  if (config.tuxler?.enabled && config.strategy !== 'dryRun') {
+    try {
+      const strategy = resolveStrategy(config.strategy);
+      await validateTuxlerActive(config, logger, { strategy });
+    } catch (err) {
+      logger.error('Start bloqueado — Tuxler inativo:', err.message);
+      return { ok: false, error: err.message };
+    }
+  }
+
+  let session;
+  try {
+    session = createBotSession({
+      logger,
+      overrides: { targetUrls: runtimeTargetUrls },
+    });
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
   loop = session.loop;
   config = session.config;
   running = true;
@@ -141,19 +170,17 @@ async function start(options = {}) {
         INTERVAL_MAX_SEC: safe.INTERVAL_MAX_SEC,
         BROWSER_RESTART_EVERY: safe.BROWSER_RESTART_EVERY,
         HEADLESS: safe.HEADLESS,
-        PROXY_ENABLED: safe.PROXY_ENABLED,
+        TUXLER_ENABLED: safe.TUXLER_ENABLED,
         BROWSE_PAGES_MIN: safe.BROWSE_PAGES_MIN,
         BROWSE_PAGES_MAX: safe.BROWSE_PAGES_MAX,
         INCLUDE_REFERRER: safe.INCLUDE_REFERRER,
-        PROXY_LIST_MASKED: safe.PROXY_LIST_MASKED,
-        PROXY_SERVER_SET: safe.PROXY_SERVER_SET,
       };
       const row = await createRun({
         source: 'dashboard',
         strategy: config.strategy,
         concurrency: config.concurrency,
         deviceMix: config.deviceMix || '',
-        proxyEnabled: Boolean(config.proxy?.enabled),
+        proxyEnabled: Boolean(config.tuxler?.enabled),
         tuxlerEnabled: Boolean(config.tuxler?.enabled),
         targetSource: config.targetSource || 'none',
         targetUrls: config.targetUrls || [],
@@ -197,7 +224,12 @@ async function stop() {
   await persistFinish('stopped');
   loop = null;
   if (runPromise) {
-    await runPromise.catch(() => {});
+    await Promise.race([
+      runPromise.catch(() => {}),
+      sleep(5_000).then(() => {
+        logger.warn('Workers ainda ativos após 5s — seguindo shutdown');
+      }),
+    ]);
     runPromise = null;
   }
   logger.info('Runtime: bot parado via dashboard');
@@ -215,14 +247,8 @@ function getStatus() {
   snapshot.runId = currentRunId;
 
   if (!running) {
-    // Ocioso: reflete o que será usado no próximo Start.
-    if (runtimeTargetUrls.length) {
-      snapshot.targetUrls = runtimeTargetUrls;
-      snapshot.targetSource = 'frontend';
-    } else {
-      snapshot.targetUrls = base.targetUrls || [];
-      snapshot.targetSource = base.targetUrls?.length ? 'env' : 'none';
-    }
+    snapshot.targetUrls = runtimeTargetUrls;
+    snapshot.targetSource = runtimeTargetUrls.length ? 'frontend' : 'none';
   }
 
   return snapshot;

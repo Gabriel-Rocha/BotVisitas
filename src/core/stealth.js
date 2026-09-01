@@ -1,7 +1,7 @@
 'use strict';
 
 const { randomInt } = require('../utils/random');
-const { sleep } = require('../utils/sleep');
+const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
 
 /**
  * Ofuscação de visita — objetivo: cada acesso parecer navegação humana normal.
@@ -399,15 +399,16 @@ async function humanScroll(page) {
  * Tempo de "leitura" + scroll + leve movimento de mouse.
  * @param {number} [dwellSec] — se omitido, sorteia 5–14s
  */
-async function humanBrowsePause(page, dwellSec) {
+async function humanBrowsePause(page, dwellSec, { signal, shouldStop } = {}) {
   const sec = dwellSec != null ? dwellSec : randomInt(1, 3);
   if (sec <= 0) {
     await humanScroll(page);
     return 0;
   }
   const vp = page.__botViewport || { width: 1280, height: 720 };
+  const waitOpts = { signal, shouldStop };
 
-  await sleep(randomInt(150, 400));
+  await sleepInterruptible(randomInt(150, 400), waitOpts);
   await humanMouseMove(
     page,
     randomInt(40, Math.max(80, vp.width - 40)),
@@ -415,9 +416,9 @@ async function humanBrowsePause(page, dwellSec) {
   );
 
   const firstChunk = Math.min(sec, 1);
-  await sleep(firstChunk * 1000);
+  await sleepInterruptible(firstChunk * 1000, waitOpts);
   await humanScroll(page);
-  await sleep(Math.max(0, sec - firstChunk) * 1000);
+  await sleepInterruptible(Math.max(0, sec - firstChunk) * 1000, waitOpts);
 
   return sec;
 }
@@ -630,6 +631,14 @@ async function collectClickCandidates(page) {
       try {
         const u = new URL(href, location.href);
         if (/play\.google\.com|apps\.apple\.com|(^|\.)google\.com$/i.test(u.hostname)) continue;
+        if (/(^|\.)duckduckgo\.com$/i.test(location.hostname)) {
+          if (/\/about|\/preferences|\/settings|\/privacy|\/params|\/spread/i.test(u.pathname)) {
+            continue;
+          }
+        }
+        if (/(^|\.)bing\.com$/i.test(location.hostname)) {
+          if (/\/search|\/account|\/profile|\/settings/i.test(u.pathname)) continue;
+        }
       } catch {
         // ignore
       }
@@ -776,43 +785,87 @@ async function clickIframeAds(page, logger) {
  * Engajamento com verificação: só conta clique se houver evento trusted ou mudança de URL.
  * Evita “clicks fantasmas” em links de footer/legal que não geram CTR.
  */
-async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger = null } = {}) {
+async function humanEngage(
+  page,
+  {
+    maxClicks = 3,
+    clickSelector = null,
+    logger = null,
+    fast = false,
+    maxMs = 10_000,
+    requireUrlChange = false,
+    signal = null,
+    shouldStop = null,
+  } = {}
+) {
   const record = [];
   const vp = page.__botViewport || { width: 1280, height: 720 };
   const selectorList =
     'a[href], button, [role="button"], input[type="submit"], input[type="button"], [onclick], .btn, .button, [data-cta], [data-click], [data-ad], ins.adsbygoogle, .adsbygoogle';
+  const deadline = maxMs > 0 ? Date.now() + maxMs : Infinity;
+  const waitOpts = { signal, shouldStop };
+  const expired = () => {
+    if (Boolean(shouldStop?.()) || Boolean(signal?.aborted)) return true;
+    if (maxMs <= 0 || Date.now() < deadline) return false;
+    // Estourou tempo — ainda permite tentar clique se nenhum foi feito
+    return record.length > 0 || attempts >= 3;
+  };
 
   await installClickProbe(page);
 
-  // Espera ads/CTA hidratarem (aggressive/light sem CSS antigo quebrava isso).
-  await sleep(randomInt(1400, 2600));
-  try {
-    await page.waitForSelector('a[href], button, iframe, [role="button"]', { timeout: 6_000 });
-  } catch {
-    // página sem interativos óbvios
+  await sleepInterruptible(randomInt(fast ? 300 : 2000, fast ? 800 : 3500), waitOpts);
+  if (expired()) {
+    return { clicks: record, clickCount: record.length, verifiedCount: 0 };
   }
-  try {
-    await page.waitForNetworkIdle({ idleTime: 600, timeout: 4_000 });
-  } catch {
-    // polling eterno
+  if (!fast) {
+    try {
+      await page.waitForSelector('a[href], button, iframe, [role="button"]', {
+        timeout: 10_000,
+      });
+    } catch {
+      // página sem interativos óbvios
+    }
+  } else {
+    try {
+      await page.waitForSelector('a[href], button, iframe, [role="button"]', {
+        timeout: 3_000,
+      });
+    } catch {
+      // fast: segue para clique
+    }
+  }
+  if (expired()) {
+    return { clicks: record, clickCount: record.length, verifiedCount: 0 };
+  }
+  if (!fast) {
+    try {
+      await page.waitForNetworkIdle({ idleTime: 400, timeout: 4_000 });
+    } catch {
+      // polling eterno
+    }
   }
 
   for (let i = 0; i < randomInt(1, 2); i += 1) {
+    if (expired()) break;
     await humanMouseMove(
       page,
       randomInt(30, Math.max(60, vp.width - 30)),
       randomInt(40, Math.max(80, vp.height - 40))
     );
-    await sleep(randomInt(80, 250));
+    await sleepInterruptible(randomInt(80, 250), waitOpts);
+  }
+  if (expired()) {
+    return { clicks: record, clickCount: record.length, verifiedCount: 0 };
   }
   await humanScroll(page);
-  await sleep(randomInt(200, 500));
+  await sleepInterruptible(randomInt(200, 500), waitOpts);
 
   const want = Math.max(1, Math.min(maxClicks, randomInt(1, Math.max(1, maxClicks))));
   let attempts = 0;
   const maxAttempts = Math.max(want * 5, 8);
 
   async function attemptClickOnHandle(handle, meta) {
+    if (expired()) return null;
     const beforeUrl = page.url();
     await installClickProbe(page);
     const probeBefore = await readClickProbe(page);
@@ -823,17 +876,31 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
     } catch {
       // ignore
     }
-    await sleep(randomInt(500, 1400));
+    await sleepInterruptible(randomInt(500, 1400), waitOpts);
+    if (expired()) return null;
     const box = await handle.boundingBox();
-    const fired = await clickAtBox(page, box);
+    let fired = await clickAtBox(page, box);
+    if (!fired) {
+      try {
+        await handle.evaluate((el) => {
+          el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+          el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+          el.click();
+        });
+        fired = true;
+      } catch {
+        fired = false;
+      }
+    }
     if (!fired) return null;
 
     try {
       await Promise.race([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8_000 }),
-        sleep(1_500),
+        sleepInterruptible(1_500, waitOpts),
       ]);
-    } catch {
+    } catch (err) {
+      if (isAbortError(err)) throw err;
       // soft
     }
     await followClientRedirects(page, logger, { maxHops: 4 });
@@ -843,14 +910,21 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
     const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
     const finalUrl = page.url();
     const hrefBlob = `${meta.href || ''} ${finalUrl}`;
-    const trackerish = /click_id|clickid|\/click|cpc=|utm_|ad_id|campaign|aff_|haff_/i.test(
+    const trackerish = /click_id|clickid|\/click|cpc=|utm_|ad_id|campaign|aff_|haff_|\bkey=|smartlink|effectivecpm|rtb/i.test(
       hrefBlob
     );
     const junkDest = /play\.google\.com|apps\.apple\.com|google\.com\/search|accounts\.google/i.test(
       hrefBlob
     );
-    // Trusted no DOM sem nav não é CTR de ads (centro cego, Google Search, etc.).
-    const verified = !junkDest && (urlChanged || (trustedDelta > 0 && trackerish));
+    const ctaish = /click|continue|watch|play|start|claim|download|join|go|next|offer|install|win/i.test(
+      `${meta.text || ''} ${meta.selector || ''}`
+    );
+    // v1+: trusted só conta com URL de tracking; ctaish sozinho gera falso positivo (DuckDuckGo etc.)
+    const verified = !junkDest && (
+      requireUrlChange
+        ? urlChanged
+        : urlChanged || (trustedDelta > 0 && trackerish) || (urlChanged && ctaish)
+    );
 
     return {
       ...meta,
@@ -929,6 +1003,7 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
 
   // 4) CTAs ranqueados com retry
   while (record.length < want && attempts < maxAttempts) {
+    if (expired()) break;
     attempts += 1;
     await installClickProbe(page);
 
@@ -940,7 +1015,7 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
     }
     if (!candidates.length) {
       if (attempts >= 2) break;
-      await sleep(1200);
+      await sleepInterruptible(1200, waitOpts);
       continue;
     }
 
@@ -979,11 +1054,11 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
       );
     }
 
-    await sleep(randomInt(250, 700));
+    await sleepInterruptible(randomInt(250, 700), waitOpts);
   }
 
   // 5) Último recurso: toque no centro da viewport (muitos interstitials são full-bleed)
-  if (!record.length) {
+  if (!record.length && !expired()) {
     const beforeUrl = page.url();
     await installClickProbe(page);
     const probeBefore = await readClickProbe(page);
@@ -1003,8 +1078,8 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
       const probeAfter = await readClickProbe(page);
       const urlChanged = page.url().split('#')[0] !== beforeUrl.split('#')[0];
       const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
-      // Centro cego só conta se a URL mudou (senão a rede de ads não registra).
-      if (urlChanged) {
+      const centerVerified = requireUrlChange ? urlChanged : urlChanged || trustedDelta > 0;
+      if (centerVerified) {
         record.push({
           via: 'viewport-center',
           verified: true,
@@ -1047,6 +1122,79 @@ async function humanEngage(page, { maxClicks = 3, clickSelector = null, logger =
     verifiedCount: record.filter((c) => c.verified).length,
     attempts,
   };
+}
+
+/**
+ * Cliques no centro — fluxo original v1 (page.mouse.click após goto).
+ * Cada worker executa os seus próprios cliques; contabiliza o que foi disparado.
+ */
+async function legacyCenterClicks(page, config, logger, { count, followRedirects = true } = {}) {
+  const vp = page.__botViewport || {
+    width: config?.viewport?.width || 1280,
+    height: config?.viewport?.height || 720,
+  };
+  const x = vp.width / 2;
+  const y = vp.height / 2;
+  const cap = Math.max(1, config?.maxClicksPerPage ?? 1);
+  const min = Math.max(1, config?.engageClicksMin ?? 1);
+  const max = Math.max(min, config?.engageClicksMax ?? cap);
+  const n = Math.max(1, count ?? randomInt(min, Math.min(cap, max)));
+
+  logger?.info?.(`Cliques no centro (${Math.round(x)},${Math.round(y)}): ${n} [v1]`);
+
+  const clicks = [];
+  for (let i = 0; i < n; i += 1) {
+    try {
+      await page.mouse.click(x, y);
+      clicks.push({
+        via: 'legacy-center',
+        verified: true,
+        performed: true,
+        index: i + 1,
+        x: Math.round(x),
+        y: Math.round(y),
+      });
+    } catch (err) {
+      logger?.warn?.(`Clique ${i + 1}/${n} falhou: ${err.message}`);
+    }
+    if (i < n - 1) {
+      await sleep(randomInt(80, 280));
+    }
+  }
+
+  if (followRedirects && clicks.length) {
+    try {
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8_000 }),
+        sleep(1_500),
+      ]);
+    } catch {
+      // soft
+    }
+    await followClientRedirects(page, logger, { maxHops: 4 });
+  }
+
+  const finalUrl = page.url();
+  for (const hit of clicks) {
+    hit.finalUrl = finalUrl;
+  }
+
+  logger?.info?.(`Cliques v1: ${clicks.length}/${n} disparados | final=${finalUrl}`);
+
+  return {
+    clicks,
+    clickCount: clicks.length,
+    verifiedCount: clicks.length,
+  };
+}
+
+/** @deprecated use legacyCenterClicks */
+async function legacyViewportClick(page, logger, opts = {}) {
+  return legacyCenterClicks(page, {}, logger, { count: 1, ...opts }).then((r) => r.clicks[0] || {
+    via: 'legacy-center',
+    verified: false,
+    performed: false,
+  });
 }
 
 const ORGANIC_REFERRERS = {
@@ -1226,6 +1374,8 @@ module.exports = {
   humanBrowsePause,
   followClientRedirects,
   humanEngage,
+  legacyCenterClicks,
+  legacyViewportClick,
   navigateLikeHuman,
   pickOrganicReferrer,
   openAsOrganicVisit,

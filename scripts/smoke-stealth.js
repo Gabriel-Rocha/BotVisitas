@@ -8,7 +8,7 @@ const fs = require('fs');
 process.env.SESSION_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'botvisitas-session-'));
 process.env.STEALTH = 'true';
 process.env.HUMANIZE = 'true';
-process.env.PROXY_ENABLED = 'false';
+process.env.TUXLER_ENABLED = 'false';
 delete process.env.SESSION_PERSIST;
 
 const { loadConfig } = require('../src/config');
@@ -26,7 +26,7 @@ const {
   computeGapMs,
   getLaunchArgs,
 } = require('../src/core/stealth');
-const { parseProxyServer, parseProxyList, getProxyLaunchArgs } = require('../src/core/proxy');
+const { parseCountryList, getProxyLaunchArgs } = require('../src/core/proxy');
 const { clickPoint } = require('../src/core/human');
 
 const config = loadConfig();
@@ -64,20 +64,11 @@ assert.ok(args.some((a) => a.startsWith('--window-size=')));
 assert.ok(!args.includes('--enable-automation'));
 assert.ok(!args.includes('--disable-http2'));
 
-const parsed = parseProxyServer('http://user:p%40ss@10.0.0.2:8080');
-assert.strictEqual(parsed.host, '10.0.0.2');
-assert.strictEqual(parsed.port, '8080');
-assert.strictEqual(parsed.username, 'user');
-assert.strictEqual(parsed.password, 'p@ss');
-assert.strictEqual(parsed.arg, 'http://10.0.0.2:8080');
-assert.deepStrictEqual(getProxyLaunchArgs(parsed), ['--proxy-server=http://10.0.0.2:8080']);
-assert.deepStrictEqual(parseProxyList('a:1, b:2\nc:3'), ['a:1', 'b:2', 'c:3']);
+assert.deepStrictEqual(getProxyLaunchArgs(null), []);
+assert.deepStrictEqual(parseCountryList('au, de ; us'), ['au', 'de', 'us']);
 
-const idWithProxy = { ...identity, proxy: parsed };
-const argsNoProxy = getLaunchArgs(config, idWithProxy, { attachProxy: false });
+const argsNoProxy = getLaunchArgs(config, identity, { attachProxy: false });
 assert.ok(!argsNoProxy.some((a) => a.startsWith('--proxy-server=')));
-const argsWithProxy = getLaunchArgs(config, idWithProxy, { attachProxy: true });
-assert.ok(argsWithProxy.includes('--proxy-server=http://10.0.0.2:8080'));
 
 const logs = [];
 const visitor = nextVisitor(config, 'Chrome/131.0.6778.108', {

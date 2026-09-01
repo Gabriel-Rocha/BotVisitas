@@ -74,9 +74,29 @@ function createApp() {
     }
   });
 
+  app.get('/api/tuxler/status', async (_req, res) => {
+    try {
+      const { loadConfig } = require('../config');
+      const { probeTuxlerActive } = require('../core/tuxler');
+      const config = loadConfig();
+      const probe = await probeTuxlerActive(config);
+      res.json({
+        ok: probe.active,
+        enabled: Boolean(config.tuxler?.enabled),
+        requireActive: config.tuxler?.requireActive !== false,
+        ...probe,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   app.post('/api/bot/start', async (req, res) => {
     try {
       const result = await botRuntime.start(req.body || {});
+      if (!result.ok) {
+        return res.status(409).json(result);
+      }
       res.json(result);
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });

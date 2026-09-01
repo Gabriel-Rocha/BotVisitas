@@ -3,7 +3,6 @@
 const fs = require('fs');
 const path = require('path');
 const { pick } = require('../utils/random');
-const { parseProxyServer } = require('./proxy');
 
 function sessionPaths(config) {
   const dir = config.session.dir;
@@ -42,16 +41,6 @@ function buildSecChUa(major) {
   return `"Not)A;Brand";v="99", "Google Chrome";v="${major}", "Chromium";v="${major}"`;
 }
 
-let proxyCursor = 0;
-
-function pickProxy(config) {
-  if (!config.proxy.enabled || !config.proxy.servers.length) return null;
-  const list = config.proxy.servers;
-  const raw = list[proxyCursor % list.length];
-  proxyCursor += 1;
-  return parseProxyServer(raw);
-}
-
 function applyLocaleOverrides(profile, config) {
   const language = config.stealth.locale || profile.language;
   const languages = profile.languages[0] === language
@@ -68,7 +57,6 @@ function applyLocaleOverrides(profile, config) {
 
 function createBaseIdentity(config) {
   const template = applyLocaleOverrides(pick(config.browserProfiles), config);
-  const proxy = pickProxy(config);
 
   return {
     profileId: template.id,
@@ -90,7 +78,7 @@ function createBaseIdentity(config) {
       latitude: config.stealth.geo.latitude,
       longitude: config.stealth.geo.longitude,
     },
-    proxy,
+    proxy: null,
     userAgent: null,
     secChUa: null,
     chromeMajor: null,
@@ -111,8 +99,7 @@ function finalizeIdentity(identity, browserVersion) {
 
 function nextVisitor(config, browserVersion, logger) {
   const identity = finalizeIdentity(createBaseIdentity(config), browserVersion);
-  const proxyLabel = identity.proxy ? identity.proxy.arg : 'direct';
-  logger.info(`Visitante novo | perfil=${identity.profileId} | proxy=${proxyLabel}`);
+  logger.info(`Visitante novo | perfil=${identity.profileId} | egress=tuxler|direct`);
   return identity;
 }
 
@@ -123,13 +110,7 @@ function loadOrCreateBaseIdentity(config, logger) {
     try {
       const saved = JSON.parse(fs.readFileSync(files.identity, 'utf8'));
       if (saved?.profileId && saved.viewport) {
-        if (!config.proxy.enabled) {
-          saved.proxy = null;
-        } else if (saved.proxy?.raw) {
-          saved.proxy = parseProxyServer(saved.proxy.raw);
-        } else {
-          saved.proxy = pickProxy(config);
-        }
+        saved.proxy = null;
         logger.info(`Identidade reutilizada: ${saved.profileId}`);
         return saved;
       }
@@ -149,7 +130,7 @@ function saveIdentity(config, identity) {
   ensureDir(files.dir);
   const serializable = {
     ...identity,
-    proxy: identity.proxy ? { raw: identity.proxy.raw } : null,
+    proxy: null,
   };
   fs.writeFileSync(files.identity, JSON.stringify(serializable, null, 2));
 }

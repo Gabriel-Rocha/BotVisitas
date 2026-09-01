@@ -11,15 +11,12 @@ const EDITABLE_KEYS = [
   'CONCURRENCY',
   'DEVICE_MIX',
   'WORKER_SLOTS',
-  'PROXY_MAX',
   'PROXY_COUNTRIES',
   'INTERVAL_MIN_SEC',
   'INTERVAL_MAX_SEC',
   'BROWSER_RESTART_EVERY',
   'HEADLESS',
-  'PROXY_ENABLED',
   'TUXLER_ENABLED',
-  'TARGET_URLS',
   'BROWSE_PAGES_MIN',
   'BROWSE_PAGES_MAX',
   'INCLUDE_REFERRER',
@@ -37,7 +34,6 @@ function parseEnvFileOnly() {
 }
 
 function getSafeConfig() {
-  // Fonte de verdade = arquivo montado (não process.env residual do Compose).
   const fileEnv = parseEnvFileOnly();
   dotenv.config({ path: ENV_PATH, override: true });
 
@@ -46,33 +42,24 @@ function getSafeConfig() {
       ? fileEnv[key]
       : process.env[key] || fallback;
 
-  const proxyList = get('PROXY_LIST', '');
-  const proxyCount = proxyList
-    ? proxyList.split(/[\n,]+/).filter((s) => s.trim()).length
-    : 0;
-
   return {
     STRATEGY: get('STRATEGY', 'dryRun'),
     CONCURRENCY: get('CONCURRENCY', '5'),
     DEVICE_MIX: get('DEVICE_MIX', ''),
     WORKER_SLOTS: get('WORKER_SLOTS', ''),
-    PROXY_MAX: get('PROXY_MAX', '10'),
     PROXY_COUNTRIES: get('PROXY_COUNTRIES', ''),
     INTERVAL_MIN_SEC: get('INTERVAL_MIN_SEC', '5'),
     INTERVAL_MAX_SEC: get('INTERVAL_MAX_SEC', '12'),
     BROWSER_RESTART_EVERY: get('BROWSER_RESTART_EVERY', '20'),
     HEADLESS: get('HEADLESS', 'true'),
-    PROXY_ENABLED: get('PROXY_ENABLED', 'false'),
-    TUXLER_ENABLED: get('TUXLER_ENABLED', 'false'),
-    TARGET_URLS: get('TARGET_URLS', ''),
+    TUXLER_ENABLED: get(
+      'TUXLER_ENABLED',
+      process.platform === 'win32' ? 'true' : 'false'
+    ),
     BROWSE_PAGES_MIN: get('BROWSE_PAGES_MIN', '0'),
     BROWSE_PAGES_MAX: get('BROWSE_PAGES_MAX', '0'),
     INCLUDE_REFERRER: get('INCLUDE_REFERRER', 'true'),
     BANDWIDTH_SAVER: get('BANDWIDTH_SAVER', 'light'),
-    PROXY_LIST_MASKED: proxyCount
-      ? `${proxyCount} proxies configurados (ocultos)`
-      : '(vazio)',
-    PROXY_SERVER_SET: Boolean(get('PROXY_SERVER', '').trim()),
   };
 }
 

@@ -2,9 +2,9 @@
 
 const { launchBrowser, closeBrowser } = require('./browser');
 const { createSession, recreateSession } = require('./session');
-const { resolveSessionLocale, isFlaggedAnonymousIp } = require('./geo');
+const { resolveSessionLocale } = require('./geo');
 const { randomInt } = require('../utils/random');
-const { sleep } = require('../utils/sleep');
+const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
 const { isTransientProxyError } = require('../utils/netErrors');
 
 /**
@@ -30,7 +30,10 @@ function createWorker({
     startedAt: Date.now(),
     iterations: 0,
     ok: 0,
+    offers: 0,
+    intermediate: 0,
     errors: 0,
+    clicks: 0,
     proxyLabel: null,
     timezoneId: null,
     locale: null,
@@ -42,6 +45,7 @@ function createWorker({
   let activeProxy = null;
   let sessionLocale = null;
   let stopping = false;
+  let abortController = null;
   let captureInProgress = null;
   let lastPreview = null;
 
@@ -51,75 +55,33 @@ function createWorker({
 
   async function acquireProxy() {
     if (!proxyLease) return null;
-    const proxy = proxyLease.acquire(preferredCountry);
+    const proxy = await proxyLease.acquire(preferredCountry);
     stats.proxyLabel = proxy.label;
-    log('info', `Proxy adquirido: ${proxy.label}`);
+    log('info', `Tuxler adquirido: ${proxy.label}`);
     return proxy;
   }
 
   function releaseProxy() {
     if (!proxyLease || !activeProxy) return;
     proxyLease.release(activeProxy);
-    log('info', `Proxy liberado: ${activeProxy.label}`);
+    log('info', `Tuxler liberado: ${activeProxy.label}`);
     activeProxy = null;
     stats.proxyLabel = null;
   }
 
-  /**
-   * Adquire proxy; PROXY_SKIP_FLAGGED (default true) descarta IPs proxy/hosting.
-   * Datacenter/anon dispara "anonymous proxy detected" no alvo.
-   */
   async function acquireUsableProxy() {
     if (!proxyLease) return null;
-
-    const skipFlagged = Boolean(config.proxy?.skipFlagged) && !config.tuxler?.enabled;
-    const maxAttempts = Math.max(1, proxyLease.size || 1);
-    let lastHints = null;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      activeProxy = await acquireProxy();
-      lastHints = await resolveLocaleForProxy(activeProxy);
-
-      if (activeProxy?.isTuxler) {
-        return { proxy: activeProxy, hints: lastHints };
-      }
-
-      const wanted = String(activeProxy.country || '').toUpperCase();
-      const got = String(lastHints.countryCode || '').toUpperCase();
-      if (wanted && got && wanted !== got) {
-        log(
-          'warn',
-          `Geo mismatch: sticky ${wanted} saiu ${got} (${activeProxy.label}) — trocando`
-        );
-        releaseProxy();
-        await sleep(200);
-        continue;
-      }
-
-      if (!skipFlagged || !isFlaggedAnonymousIp(lastHints)) {
-        return { proxy: activeProxy, hints: lastHints };
-      }
-
-      log(
-        'warn',
-        `PROXY_SKIP_FLAGGED: descartando ${activeProxy.label} (proxy=${lastHints.isProxy} hosting=${lastHints.isHosting})`
-      );
-      releaseProxy();
-      await sleep(200);
-    }
-
-    throw new Error(
-      'Nenhum proxy limpo no pool (todos marcados proxy/hosting). ' +
-        'Plano free/datacenter dispara "anonymous proxy detected". ' +
-        'Use proxies residenciais/mobile ou PROXY_SKIP_FLAGGED=false. Ver docs/09-proxies-webshare.md'
-    );
+    activeProxy = await acquireProxy();
+    const hints = await resolveLocaleForProxy(activeProxy);
+    return { proxy: activeProxy, hints };
   }
 
   async function resolveLocaleForProxy(proxy) {
     const hints = await resolveSessionLocale({
-      proxy: proxy?.isTuxler ? null : proxy,
-      fallbackTimezone: config.stealth?.timezoneId || 'America/Sao_Paulo',
-      fallbackLocale: config.stealth?.locale || 'pt-BR',
+      egressGeo: proxy?.geo || null,
+      proxy: proxy?.ip ? { host: proxy.ip, label: proxy.label } : null,
+      fallbackTimezone: config.stealth?.timezoneId || 'UTC',
+      fallbackLocale: config.stealth?.locale || 'en-US',
       enabled: config.stealth?.geoTz !== false,
       logger: {
         info: (...a) => log('info', ...a),
@@ -137,6 +99,8 @@ function createWorker({
   async function ensureBrowser() {
     if (!needsBrowser) return;
     if (browser && browser.isConnected()) return;
+
+    log('info', 'Subindo Chromium...');
 
     await closeBrowser(browser, {
       info: (...a) => log('info', ...a),
@@ -158,7 +122,7 @@ function createWorker({
         warn: (...a) => log('warn', ...a),
         debug: (...a) => log('debug', ...a),
       },
-      activeProxy?.isTuxler ? null : activeProxy,
+      null,
       { lang: localeHints.locale }
     );
 
@@ -171,7 +135,7 @@ function createWorker({
         warn: (...a) => log('warn', ...a),
         debug: (...a) => log('debug', ...a),
       },
-      activeProxy,
+      null,
       device,
       localeHints
     );
@@ -194,7 +158,7 @@ function createWorker({
       try {
         await acquireUsableProxy();
       } catch (err) {
-        log('warn', 'Sem proxy limpo no restart — aguardando e tentando de novo:', err.message);
+        log('warn', 'Falha ao rotacionar Tuxler no restart — tentando de novo:', err.message);
         await sleep(2000);
         await acquireUsableProxy();
       }
@@ -211,10 +175,28 @@ function createWorker({
     await restartBrowserWithNewProxy();
   }
 
-  async function tick() {
-    await ensureBrowser();
+  async function releaseTuxlerTurn() {
+    if (!config.tuxler?.enabled || !proxyLease) return;
+    await closeBrowser(browser, {
+      info: (...a) => log('info', ...a),
+      warn: (...a) => log('warn', ...a),
+    });
+    browser = null;
+    page = null;
+    sessionLocale = null;
+    releaseProxy();
+  }
 
-    const result = await strategy.run(page, {
+  function visitContext() {
+    return {
+      shouldStop: () => stopping,
+      signal: abortController?.signal,
+    };
+  }
+
+  async function runStrategyWithCap() {
+    const ctx = visitContext();
+    const runPromise = strategy.run(page, {
       config,
       logger: {
         info: (...a) => log('info', ...a),
@@ -222,13 +204,64 @@ function createWorker({
         error: (...a) => log('error', ...a),
         debug: (...a) => log('debug', ...a),
       },
+      ...ctx,
     });
 
-    if (result?.ok) stats.ok += 1;
-    else stats.errors += 1;
+    const maxSec = config.visitMaxSec || 0;
+    if (!maxSec || maxSec <= 0) return runPromise;
+
+    let timer;
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error(`Visita abortada (${maxSec}s)`);
+        err.code = 'VISIT_TIMEOUT';
+        reject(err);
+      }, maxSec * 1000);
+    });
+
+    try {
+      return await Promise.race([runPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function tick() {
+    if (stopping) return;
+    abortController = new AbortController();
+    await ensureBrowser();
+
+    const result = await runStrategyWithCap();
+
+    if (result?.ok) {
+      stats.ok += 1;
+      const q = result.quality || 'offer';
+      if (q === 'intermediate') stats.intermediate += 1;
+      else stats.offers += 1;
+      const visitClicks = result.meta?.clickCount ?? result.meta?.verifiedClicks ?? 0;
+      stats.clicks += visitClicks;
+      if (visitClicks > 0) {
+        log('info', `Cliques na visita: ${visitClicks} (total worker: ${stats.clicks})`);
+      }
+    } else {
+      stats.errors += 1;
+    }
 
     stats.iterations += 1;
-    await maybeRestartBrowser();
+
+    // Fila só quando Tuxler rotaciona IP entre workers (restart/coords).
+    const tuxlerRotates = (config.tuxler?.rotateMode || 'skip').toLowerCase() !== 'skip';
+    const tuxlerTurnQueue = Boolean(
+      config.tuxler?.enabled &&
+        proxyLease &&
+        tuxlerRotates &&
+        (config.concurrency || 1) > 1
+    );
+    if (tuxlerTurnQueue) {
+      await releaseTuxlerTurn();
+    } else {
+      await maybeRestartBrowser();
+    }
   }
 
   async function run() {
@@ -241,25 +274,59 @@ function createWorker({
       try {
         await tick();
       } catch (err) {
+        if (stopping || isAbortError(err)) {
+          break;
+        }
         stats.errors += 1;
         log('error', 'Erro na iteração:', err.message);
         log('debug', err.stack);
 
+        if (err.code === 'VISIT_TIMEOUT') {
+          stats.iterations += 1;
+          log('warn', 'Iteração estourou VISIT_MAX_SEC — próximo link');
+          try {
+            page = await recreateSession(
+              browser,
+              page,
+              config,
+              {
+                info: (...a) => log('info', ...a),
+                debug: (...a) => log('debug', ...a),
+              },
+              activeProxy,
+              device,
+              sessionLocale
+            );
+          } catch {
+            await releaseTuxlerTurn();
+          }
+          continue;
+        }
+
         if (needsBrowser) {
-          const rotateProxy = Boolean(proxyLease) && isTransientProxyError(err);
+          const tuxlerSkip =
+            config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
+          const rotateProxy =
+            Boolean(proxyLease) && isTransientProxyError(err) && !tuxlerSkip;
           try {
             if (rotateProxy) {
               log('warn', 'Erro de túnel/proxy — trocando sticky e reiniciando browser');
-              await closeBrowser(browser, {
-                info: (...a) => log('info', ...a),
-                warn: (...a) => log('warn', ...a),
-              });
-              browser = null;
-              page = null;
-              sessionLocale = null;
-              releaseProxy();
-              await acquireUsableProxy();
+              await releaseTuxlerTurn();
               await ensureBrowser();
+            } else if (isTransientProxyError(err)) {
+              log('warn', 'Erro de rede/proxy — recriando sessão (Tuxler skip, sem rotação)');
+              page = await recreateSession(
+                browser,
+                page,
+                config,
+                {
+                  info: (...a) => log('info', ...a),
+                  debug: (...a) => log('debug', ...a),
+                },
+                activeProxy,
+                device,
+                sessionLocale
+              );
             } else {
               page = await recreateSession(
                 browser,
@@ -275,14 +342,7 @@ function createWorker({
               );
             }
           } catch {
-            await closeBrowser(browser, {
-              info: (...a) => log('info', ...a),
-              warn: (...a) => log('warn', ...a),
-            });
-            browser = null;
-            page = null;
-            sessionLocale = null;
-            releaseProxy();
+            await releaseTuxlerTurn();
           }
         }
       }
@@ -291,17 +351,26 @@ function createWorker({
 
       const waitSec = randomInt(config.intervalMinSec, config.intervalMaxSec);
       log('info', `Aguardando ${waitSec}s...`);
-      await sleep(waitSec * 1000);
+      try {
+        await sleepInterruptible(waitSec * 1000, {
+          shouldStop: () => stopping,
+          signal: abortController?.signal,
+        });
+      } catch {
+        break;
+      }
     }
   }
 
   async function stop() {
     stopping = true;
+    abortController?.abort();
     log('info', 'Encerrando...', JSON.stringify(getStats()));
     if (needsBrowser) {
       await closeBrowser(browser, {
         info: (...a) => log('info', ...a),
         warn: (...a) => log('warn', ...a),
+        debug: (...a) => log('debug', ...a),
       });
     }
     browser = null;
@@ -316,12 +385,33 @@ function createWorker({
     if (captureInProgress) return captureInProgress;
 
     captureInProgress = (async () => {
-      const image = await page.screenshot({
-        type: 'jpeg',
-        quality: 68,
-        fullPage: false,
-        captureBeyondViewport: false,
-      });
+      let image;
+      try {
+        image = await page.screenshot({
+          type: 'jpeg',
+          quality: 58,
+          fullPage: false,
+          captureBeyondViewport: false,
+          timeout: 12_000,
+        });
+      } catch (err) {
+        const msg = String(err?.message || err);
+        if (lastPreview?.image) {
+          log('debug', `Preview indisponível (${msg}) — reutilizando última captura`);
+          return {
+            image: lastPreview.image,
+            capturedAt: lastPreview.capturedAt,
+            title: lastPreview.title,
+            url: lastPreview.url,
+            stale: true,
+          };
+        }
+        throw new Error(
+          msg.includes('timeout') || msg.includes('Timeout')
+            ? 'Captura expirou (página navegando?)'
+            : msg
+        );
+      }
       let title = '';
       try {
         title = await page.title();
@@ -332,6 +422,7 @@ function createWorker({
         capturedAt: new Date().toISOString(),
         title,
         url: page.url(),
+        image,
       };
       return { image, ...lastPreview };
     })();

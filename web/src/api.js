@@ -23,25 +23,37 @@ export async function fetchStatus() {
   return res.json();
 }
 
-export async function fetchWorkerPreview(workerId) {
-  const res = await fetch(`/api/workers/${workerId}/preview`, {
-    headers: headers(),
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    let message = `preview ${res.status}`;
-    try {
-      const data = await res.json();
-      message = data.error || message;
-    } catch {
-      // resposta sem JSON
+export async function fetchWorkerPreview(workerId, timeoutMs = 20_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`/api/workers/${workerId}/preview`, {
+      headers: headers(),
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let message = `preview ${res.status}`;
+      try {
+        const data = await res.json();
+        message = data.error || message;
+      } catch {
+        // resposta sem JSON
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
+    return {
+      blob: await res.blob(),
+      capturedAt: res.headers.get('X-Preview-Captured-At'),
+    };
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Preview expirou (servidor ocupado?)');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return {
-    blob: await res.blob(),
-    capturedAt: res.headers.get('X-Preview-Captured-At'),
-  };
 }
 
 export async function fetchConfig() {

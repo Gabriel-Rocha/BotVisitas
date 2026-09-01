@@ -2,7 +2,6 @@
 
 const { pick } = require('../utils/random');
 const { pickSessionPersona } = require('./devices');
-const { applyProxyAuth } = require('./proxy');
 const { resolveSessionLocale } = require('./geo');
 const {
   applyPageStealth,
@@ -21,10 +20,6 @@ async function createSession(
   preResolvedLocale = null
 ) {
   const page = await browser.newPage();
-
-  if (activeProxy && !activeProxy.isTuxler) {
-    await applyProxyAuth(page, activeProxy);
-  }
 
   let viewport;
   let userAgent;

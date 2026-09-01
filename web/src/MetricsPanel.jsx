@@ -67,6 +67,8 @@ export default function MetricsPanel({ status }) {
 
   const stats = status.stats || {
     ok: 0,
+    offers: 0,
+    intermediate: 0,
     errors: 0,
     iterations: 0,
     uptimeSec: 0,
@@ -75,10 +77,11 @@ export default function MetricsPanel({ status }) {
   };
   const workers = stats.workers || [];
   const liveTotal = (stats.ok || 0) + (stats.errors || 0);
+  const offerRate = pct(stats.offers || 0, stats.iterations || liveTotal);
   const successRate = pct(stats.ok || 0, liveTotal);
   const errorRate = pct(stats.errors || 0, liveTotal);
-  const throughput = ratePerHour(stats.ok || 0, stats.uptimeSec || 0);
-  const maxWorkerOk = Math.max(1, ...workers.map((w) => w.ok || 0));
+  const throughput = ratePerHour(stats.offers || stats.ok || 0, stats.uptimeSec || 0);
+  const maxWorkerOk = Math.max(1, ...workers.map((w) => w.offers || w.ok || 0));
   const devices = stats.devices || {};
   const deviceTotal = Object.values(devices).reduce((s, n) => s + n, 0) || 1;
 
@@ -107,7 +110,19 @@ export default function MetricsPanel({ status }) {
 
       <div className="grid metrics-grid">
         <div className="metric">
-          <div className="label">Taxa de sucesso</div>
+          <div className="label">Ofertas</div>
+          <div className="value">{stats.offers ?? 0}</div>
+        </div>
+        <div className="metric">
+          <div className="label">Taxa oferta</div>
+          <div className="value">{offerRate}%</div>
+        </div>
+        <div className="metric">
+          <div className="label">Intermediárias</div>
+          <div className="value">{stats.intermediate ?? 0}</div>
+        </div>
+        <div className="metric">
+          <div className="label">Taxa sucesso</div>
           <div className="value">{successRate}%</div>
         </div>
         <div className="metric">
@@ -131,8 +146,8 @@ export default function MetricsPanel({ status }) {
           <div className="value">{status.targetUrls?.length || 0}</div>
         </div>
         <div className="metric">
-          <div className="label">Proxy pool</div>
-          <div className="value">{status.proxyEnabled ? status.proxyPoolSize || 0 : 0}</div>
+          <div className="label">Tuxler</div>
+          <div className="value">{status.tuxlerEnabled ? 'on' : 'off'}</div>
         </div>
         <div className="metric">
           <div className="label">Iterações</div>
@@ -200,10 +215,11 @@ export default function MetricsPanel({ status }) {
                         {w.deviceType || 'desktop'}
                       </span>
                       <span className="muted">
-                        ok={w.ok} · err={w.errors} · {pct(w.ok || 0, total)}%
+                        ofertas={w.offers ?? 0} · inter={w.intermediate ?? 0} · err=
+                        {w.errors} · {pct(w.offers || 0, total)}% oferta
                       </span>
                     </div>
-                    <Bar value={w.ok || 0} max={maxWorkerOk} tone="ok" />
+                    <Bar value={w.offers || w.ok || 0} max={maxWorkerOk} tone="ok" />
                     {w.currentUrl ? (
                       <a
                         className="worker-url"

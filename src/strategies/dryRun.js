@@ -7,12 +7,12 @@
 async function run(_page, { config, logger }) {
   const wouldVisit = config.targetUrls.length
     ? config.targetUrls
-    : ['(nenhuma TARGET_URLS configurada)'];
+    : ['(nenhum link — cole no painel antes do Start)'];
 
   logger.info('[dryRun] Pipeline OK — sem browser e sem direct links');
   logger.info(`[dryRun] Em produção visitaria: ${wouldVisit.join(', ')}`);
   logger.info(
-    `[dryRun] includeReferrer=${config.includeReferrer} | maxClicks=${config.maxClicksPerPage} | proxy=${config.proxy.enabled} | stealth=${config.stealth.enabled} | persist=${config.session.persist}`
+    `[dryRun] includeReferrer=${config.includeReferrer} | maxClicks=${config.maxClicksPerPage} | tuxler=${Boolean(config.tuxler?.enabled)}`
   );
 
   return {

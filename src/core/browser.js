@@ -1,13 +1,14 @@
 'use strict';
 
 const fs = require('fs');
+const { spawn } = require('child_process');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { getProxyLaunchArgs } = require('./proxy');
+const { getProxyLaunchArgs, getTuxlerLaunchArgs } = require('./proxy');
 const { getStealthLaunchArgs } = require('./stealth');
+const { sleep } = require('../utils/sleep');
 
 puppeteer.use(StealthPlugin());
-
 const SYSTEM_CHROME_CANDIDATES = [
   process.env.CHROME_EXECUTABLE_PATH,
   process.env.PUPPETEER_EXECUTABLE_PATH,
@@ -38,6 +39,10 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     logger.info(`Proxy selecionado: ${activeProxy.label}`);
   }
 
+  const proxyArgs = config.tuxler?.enabled
+    ? await getTuxlerLaunchArgs(logger, config)
+    : getProxyLaunchArgs(activeProxy);
+
   const args = [
     '--disable-dev-shm-usage',
     '--no-sandbox',
@@ -46,7 +51,7 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     '--disable-notifications',
     '--ignore-certificate-errors',
     ...getStealthLaunchArgs({ lang: stealthOpts.lang }),
-    ...getProxyLaunchArgs(activeProxy),
+    ...proxyArgs,
   ];
 
   const options = {
@@ -73,14 +78,40 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
   return { browser, activeProxy };
 }
 
-async function closeBrowser(browser, logger) {
-  if (!browser) return;
+function killProcessTree(pid, logger) {
+  if (!pid || pid <= 0) return;
   try {
-    await browser.close();
-    logger.info('Browser encerrado');
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+    } else {
+      process.kill(pid, 'SIGKILL');
+    }
+    logger?.warn?.(`Processo Chromium ${pid} encerrado à força`);
   } catch (err) {
-    logger.warn('Falha ao encerrar browser:', err.message);
+    logger?.debug?.('killProcessTree:', err.message);
   }
 }
 
-module.exports = { launchBrowser, closeBrowser, resolveChromePath };
+async function closeBrowser(browser, logger, { forceMs = 8_000 } = {}) {
+  if (!browser) return;
+  const proc = typeof browser.process === 'function' ? browser.process() : null;
+  const pid = proc?.pid;
+
+  try {
+    await Promise.race([
+      browser.close(),
+      sleep(forceMs).then(() => {
+        logger.warn(`browser.close() > ${forceMs}ms — matando árvore de processos`);
+        if (pid) killProcessTree(pid, logger);
+      }),
+    ]);
+    logger.info('Browser encerrado');
+  } catch (err) {
+    logger.warn('Falha ao encerrar browser:', err.message);
+    if (pid) killProcessTree(pid, logger);
+  }
+}
+module.exports = { launchBrowser, closeBrowser, killProcessTree, resolveChromePath };

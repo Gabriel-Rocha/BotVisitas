@@ -93,7 +93,6 @@ export function slotsToPatch(slots) {
     WORKER_SLOTS: serializeWorkerSlots(slots),
     DEVICE_MIX: mix,
     CONCURRENCY: String(Math.max(1, n)),
-    PROXY_MAX: String(Math.max(1, n)),
     PROXY_COUNTRIES: slots.map((slot) => slot.country).filter(Boolean).join(','),
   };
 }
@@ -177,8 +176,8 @@ export default function WorkersMixer({
         <div>
           <h2>Workers</h2>
           <p className="muted">
-            Adiciona ou tira um worker. A VPN (país) é sorteada. Vale no próximo
-            Start/Restart.
+            Cada worker = 1 browser (mobile ou desktop) visitando links em paralelo. Vale no
+            próximo Start/Restart.
           </p>
         </div>
         <div className={`workers-total ${slots.length >= MAX_WORKERS ? 'at-cap' : ''}`}>

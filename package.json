@@ -11,13 +11,18 @@
     "start:dry": "node -e \"process.env.STRATEGY='dryRun';require('./src/index.js')\"",
     "start:headed": "node -e \"process.env.HEADLESS='false';require('./src/index.js')\"",
     "test:server": "node scripts/test-server.js",
+    "tuxler:rotate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tuxler-rotate.ps1",
+    "tuxler:check": "node scripts/tuxler-check.js",
+    "tuxler:check:quick": "node scripts/tuxler-check.js --quick",
+    "stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-all.ps1",
+    "stop:force": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-all.ps1",
     "browsers:install": "npx puppeteer browsers install chrome",
     "postinstall": "npx puppeteer browsers install chrome || true",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f bot",
     "docker:restart": "docker compose restart bot",
-    "test": "node -e \"const c=require('./src/config').loadConfig(); const g=require('./src/core/geo'); if(!c.proxy.skipFlagged||!c.proxy.fallbackDirect) process.exit(2); if(!g.isFlaggedAnonymousIp({isProxy:true})) process.exit(3); console.log('config ok');\""
+    "test": "node -e \"const c=require('./src/config').loadConfig(); if(!Array.isArray(c.targetUrls)||c.targetUrls.length!==0) process.exit(2); if(!c.tuxler||typeof c.tuxler.enabled!=='boolean') process.exit(3); console.log('config ok');\""
   },
   "engines": {
     "node": ">=18"
