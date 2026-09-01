@@ -193,9 +193,26 @@ export default function App() {
           </h1>
           <p className="tagline">Console de operação — workers, Tuxler e logs</p>
         </div>
-        <div className="status-pill">
-          <span className={`dot ${running ? 'on' : 'off'}`} />
-          {running ? 'running' : 'stopped'}
+        <div className="status-pills">
+          <div className="status-pill">
+            <span className={`dot ${running ? 'on' : 'off'}`} />
+            {running ? 'running' : 'stopped'}
+          </div>
+          {status.memory ? (
+            <div
+              className={`status-pill ram-pill level-${status.memory.level || 'ok'}`}
+              title="RAM do PC (os.freemem). Custo ~0. Node RSS = processo dashboard, não os Chromiums."
+            >
+              RAM {Math.round((status.memory.usedPct || 0) * 100)}%
+              <span className="ram-pill-detail">
+                {(status.memory.usedMb / 1024).toFixed(1)}/
+                {(status.memory.totalMb / 1024).toFixed(1)} GB
+                {status.memory.nodeRssMb
+                  ? ` · node ${status.memory.nodeRssMb} MB`
+                  : ''}
+              </span>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -303,6 +320,34 @@ export default function App() {
         <div className="metric">
           <div className="label">Uptime (s)</div>
           <div className="value">{stats.uptimeSec || 0}</div>
+        </div>
+        <div className={`metric metric-ram level-${status.memory?.level || 'ok'}`}>
+          <div className="label">RAM PC</div>
+          <div className="value value-sm">
+            {status.memory
+              ? `${Math.round((status.memory.usedPct || 0) * 100)}%`
+              : '—'}
+          </div>
+          {status.memory ? (
+            <>
+              <div className="indicator-bar-track ram-track">
+                <div
+                  className={`indicator-bar-fill tone-${status.memory.level || 'ok'}`}
+                  style={{
+                    width: `${Math.min(100, Math.round((status.memory.usedPct || 0) * 100))}%`,
+                  }}
+                />
+              </div>
+              <p className="muted ram-caption">
+                {(status.memory.usedMb / 1024).toFixed(1)} /{' '}
+                {(status.memory.totalMb / 1024).toFixed(1)} GB · livre{' '}
+                {status.memory.freeMb} MB
+                {typeof stats.browserRestarts === 'number'
+                  ? ` · reciclagens ${stats.browserRestarts}`
+                  : ''}
+              </p>
+            </>
+          ) : null}
         </div>
       </div>
 

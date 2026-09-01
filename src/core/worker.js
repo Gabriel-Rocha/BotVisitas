@@ -240,6 +240,19 @@ function createWorker({
 
     try {
       return await Promise.race([runPromise, timeoutPromise]);
+    } catch (err) {
+      abortController?.abort();
+      if (page && !page.isClosed()) {
+        try {
+          await page.stopLoading();
+        } catch {
+          // ignore
+        }
+      }
+      if (err.code === 'VISIT_TIMEOUT') {
+        await Promise.race([runPromise.catch(() => {}), sleep(1_500)]);
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }
@@ -307,9 +320,14 @@ function createWorker({
         log('error', 'Erro na iteração:', err.message);
         log('debug', err.stack);
 
-        if (err.code === 'VISIT_TIMEOUT') {
+        if (err.code === 'VISIT_TIMEOUT' || err.code === 'NAV_GATE_TIMEOUT') {
           stats.iterations += 1;
-          log('warn', 'Iteração estourou VISIT_MAX_SEC — próximo link');
+          log(
+            'warn',
+            err.code === 'NAV_GATE_TIMEOUT'
+              ? 'SOCKS saturado (nav gate) — próximo link'
+              : 'Iteração estourou VISIT_MAX_SEC — próximo link'
+          );
           try {
             page = await recreateSession(
               browser,

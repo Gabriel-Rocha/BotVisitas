@@ -18,6 +18,7 @@ const {
   probeTuxlerSocks,
 } = require('./proxy');
 const { sleep } = require('../utils/sleep');
+const { rememberTuxlerExit } = require('./tuxlerStore');
 
 class TuxlerInactiveError extends Error {
   constructor(message) {
@@ -254,6 +255,12 @@ function toTuxlerSlot(geo) {
   };
 }
 
+function persistTuxlerSlot(geo, config) {
+  const slot = toTuxlerSlot(geo);
+  rememberTuxlerExit(slot, config);
+  return slot;
+}
+
 const EGRESS_REFRESH_MS = 30_000;
 
 function createTuxlerLease(config, logger) {
@@ -283,7 +290,7 @@ function createTuxlerLease(config, logger) {
       },
       async acquire(_preferredCountry) {
         const geo = await resolveEgress(null);
-        return toTuxlerSlot(geo);
+        return persistTuxlerSlot(geo, config);
       },
       release(_proxy) {
         // skip: workers paralelos, sem fila
@@ -329,11 +336,11 @@ function createTuxlerLease(config, logger) {
       await waitTurn();
       try {
         const geo = await resolveEgress(preferredCountry);
-        return toTuxlerSlot(geo);
+        return persistTuxlerSlot(geo, config);
       } catch (err) {
         logger?.warn?.(`Tuxler acquire fallback: ${err.message}`);
         const geo = await safeFetchEgress(config, logger, preferredCountry);
-        return toTuxlerSlot(geo);
+        return persistTuxlerSlot(geo, config);
       }
     },
     release(_proxy) {
@@ -410,7 +417,7 @@ async function validateTuxlerActive(config, logger, { strategy = null } = {}) {
   logger.info(
     `Tuxler OK | ip=${geo.ip} cc=${geo.countryCode} tz=${geo.timezoneId || '?'} | socks=${socks.proxyUrl}`
   );
-
+  rememberTuxlerExit(toTuxlerSlot(geo), config);
   return { ok: true, socks, geo };
 }
 

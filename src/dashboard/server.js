@@ -4,6 +4,7 @@ const { createApp } = require('./routes');
 const { createBufferedLogger } = require('./bufferedLogger');
 const { initDb, closePool, logQueue } = require('../db');
 const { sleep } = require('../utils/sleep');
+const { installBenignPuppeteerHandlers } = require('../utils/puppeteerErrors');
 // Garante reload do .env antes de ler DATABASE_URL
 require('../config');
 
@@ -91,6 +92,7 @@ async function shutdown(signal) {
   }
 }
 
+installBenignPuppeteerHandlers(logger);
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 

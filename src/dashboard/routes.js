@@ -74,6 +74,16 @@ function createApp() {
     }
   });
 
+  app.get('/api/tuxler/exits', (_req, res) => {
+    try {
+      const { listTuxlerExits, STORE_PATH } = require('../core/tuxlerStore');
+      const store = listTuxlerExits();
+      res.json({ ok: true, file: STORE_PATH, ...store });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   app.get('/api/tuxler/status', async (_req, res) => {
     try {
       const { loadConfig } = require('../config');

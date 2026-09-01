@@ -5,6 +5,7 @@ const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices')
 const { sleep } = require('../utils/sleep');
 const { createTuxlerLease, assertTuxlerReady, validateTuxlerActive } = require('./tuxler');
 const { FREE_PLAN_MAX, resetTuxlerSocksCache } = require('./proxy');
+const { resetTuxlerNavGate } = require('./navGate');
 const { clearGeoCache } = require('./geo');
 const { createMemoryWatch } = require('./memoryWatch');
 
@@ -106,6 +107,7 @@ function createLoop({ config, strategy, logger }) {
 
     if (config.tuxler?.enabled && strategy.requiresBrowser !== false) {
       resetTuxlerSocksCache();
+      resetTuxlerNavGate();
       clearGeoCache();
       await validateTuxlerActive(config, logger, { strategy });
       proxyLease = createTuxlerLease(config, logger);
@@ -124,7 +126,7 @@ function createLoop({ config, strategy, logger }) {
       .join(', ');
 
     logger.info(
-      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | tuxler=${Boolean(config.tuxler?.enabled && proxyLease)} | restartEvery=${config.browserRestartEvery || 0}`
+      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | tuxler=${Boolean(config.tuxler?.enabled && proxyLease)} | restartEvery=${config.browserRestartEvery || 0} | navSlots=${config.tuxler?.navSlots || 3}`
     );
     if (process.platform === 'win32') {
       logger.info(

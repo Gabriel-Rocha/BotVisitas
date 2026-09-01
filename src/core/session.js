@@ -11,6 +11,33 @@ const {
 } = require('./stealth');
 const { applyBandwidthSaver } = require('./bandwidth');
 
+function attachPopupGuard(page) {
+  if (page.__botPopupGuard) return;
+  page.__botPopupGuard = true;
+  page.on('popup', (popup) => {
+    // Fecha depois do stealth terminar o onPageCreated — close imediato crasha o Node.
+    setTimeout(() => {
+      popup.close().catch(() => {});
+    }, 1_200);
+  });
+}
+
+async function acquirePage(browser) {
+  const pages = await browser.pages().catch(() => []);
+  const reusable = pages.find((p) => p && !p.isClosed());
+  if (reusable) return reusable;
+  return browser.newPage();
+}
+
+async function closeExtraPages(browser, keep) {
+  const pages = await browser.pages().catch(() => []);
+  await Promise.all(
+    pages
+      .filter((p) => p && p !== keep && !p.isClosed())
+      .map((p) => p.close().catch(() => {}))
+  );
+}
+
 async function createSession(
   browser,
   config,
@@ -19,24 +46,8 @@ async function createSession(
   device = null,
   preResolvedLocale = null
 ) {
-  const pages = await browser.pages().catch(() => []);
-  for (const extra of pages) {
-    try {
-      const extraUrl = extra.url();
-      if (extraUrl === 'about:blank' && pages.length === 1) {
-        await extra.close().catch(() => {});
-      } else if (extraUrl !== 'about:blank') {
-        await extra.close().catch(() => {});
-      }
-    } catch {
-      // popup órfão
-    }
-  }
-
-  const page = await browser.newPage();
-  page.on('popup', (popup) => {
-    popup.close().catch(() => {});
-  });
+  const page = await acquirePage(browser);
+  attachPopupGuard(page);
 
   let viewport;
   let userAgent;
@@ -118,6 +129,7 @@ async function createSession(
     `device=${page.__botDeviceType} | touch=${hasTouch} | tz=${localeHints.timezoneId} | locale=${localeHints.locale} | UA: ${userAgent}`
   );
 
+  await closeExtraPages(browser, page);
   return page;
 }
 
@@ -136,6 +148,7 @@ async function recreateSession(
     } catch {
       // ignore
     }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return createSession(browser, config, logger, activeProxy, device, preResolvedLocale);
 }

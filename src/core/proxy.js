@@ -210,8 +210,15 @@ async function getTuxlerLaunchArgs(logger, config = {}) {
   const socks = await ensureTuxlerSocks(config, logger, 0);
 
   if (socks.open && socks.proxyUrl) {
-    logger?.info?.(`Tuxler: Chromium via ${socks.proxyUrl}`);
-    return [`--proxy-server=${socks.proxyUrl}`];
+    const host = socks.host || '127.0.0.1';
+    logger?.info?.(`Tuxler: Chromium via ${socks.proxyUrl} (DNS pelo SOCKS, sem HTTP/2)`);
+    return [
+      `--proxy-server=${socks.proxyUrl}`,
+      `--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE ${host}`,
+      '--disable-http2',
+      '--disable-quic',
+      '--disable-features=UseDnsHttpsSvcb,UseDnsHttpsSvcbAlpn,Http2',
+    ];
   }
 
   if (config.tuxler?.requireActive !== false && config.tuxler?.enabled) {

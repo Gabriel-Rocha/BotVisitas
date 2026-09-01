@@ -6,6 +6,18 @@ function bytesToMb(n) {
   return Math.round((Number(n) || 0) / 1024 / 1024);
 }
 
+function readNodeMemory() {
+  try {
+    const usage = process.memoryUsage();
+    return {
+      nodeRssMb: bytesToMb(usage.rss),
+      nodeHeapMb: bytesToMb(usage.heapUsed),
+    };
+  } catch {
+    return { nodeRssMb: 0, nodeHeapMb: 0 };
+  }
+}
+
 function readMemorySnapshot() {
   const total = os.totalmem();
   const free = os.freemem();
@@ -16,6 +28,7 @@ function readMemorySnapshot() {
     freeMb: bytesToMb(free),
     usedMb: bytesToMb(used),
     usedPct,
+    ...readNodeMemory(),
   };
 }
 

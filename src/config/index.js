@@ -126,6 +126,7 @@ function loadConfig() {
       socksHost: (process.env.TUXLER_SOCKS_HOST || '').trim() || null,
       socksPort: int(process.env.TUXLER_SOCKS_PORT, 0) || null,
       requireActive: bool(process.env.TUXLER_REQUIRE_ACTIVE, true),
+      navSlots: int(process.env.TUXLER_NAV_SLOTS, 3),
       clickRelX: float(process.env.TUXLER_CLICK_X, 0.5),
       clickRelY: float(process.env.TUXLER_CLICK_Y, 0.68),
       activateRelX: float(process.env.TUXLER_ACTIVATE_X, 0.5),

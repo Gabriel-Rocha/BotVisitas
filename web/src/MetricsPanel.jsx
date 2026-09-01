@@ -141,13 +141,39 @@ export default function MetricsPanel({ status }) {
           <div className="label">Workers</div>
           <div className="value">{workers.length}</div>
         </div>
-        <div className="metric">
-          <div className="label">RAM livre</div>
-          <div className="value value-sm">
-            {stats.memory
-              ? `${stats.memory.freeMb} / ${stats.memory.totalMb} MB`
+        <div className={`metric metric-ram level-${(status.memory || stats.memory)?.level || 'ok'}`}>
+          <div className="label">RAM do PC</div>
+          <div className="value">
+            {status.memory || stats.memory
+              ? `${Math.round(((status.memory || stats.memory).usedPct || 0) * 100)}%`
               : '—'}
           </div>
+          {status.memory || stats.memory ? (
+            <>
+              <div className="indicator-bar-track ram-track">
+                <div
+                  className={`indicator-bar-fill tone-${(status.memory || stats.memory).level || 'ok'}`}
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round(((status.memory || stats.memory).usedPct || 0) * 100)
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="muted ram-caption">
+                {((status.memory || stats.memory).usedMb / 1024).toFixed(1)} /{' '}
+                {((status.memory || stats.memory).totalMb / 1024).toFixed(1)} GB
+                {' · '}
+                livre {(status.memory || stats.memory).freeMb} MB
+                {(status.memory || stats.memory).nodeRssMb
+                  ? ` · node ${(status.memory || stats.memory).nodeRssMb} MB`
+                  : ''}
+              </p>
+            </>
+          ) : (
+            <div className="value value-sm">—</div>
+          )}
         </div>
         <div className="metric">
           <div className="label">Reciclagens</div>

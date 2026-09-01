@@ -3,6 +3,7 @@
 const { pick, randomInt } = require('../utils/random');
 const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
 const { isTransientProxyError } = require('../utils/netErrors');
+const { getTuxlerNavGate } = require('../core/navGate');
 const { isHeavyOfferHost } = require('../core/bandwidth');
 const {
   isIntermediateHost,
@@ -20,22 +21,34 @@ const {
   openAsOrganicVisit,
 } = require('../core/stealth');
 
-async function gotoWithRetry(page, url, logger, { attempts = 3, shouldStop } = {}) {
+async function gotoWithRetry(page, url, logger, { attempts = 3, shouldStop, signal, config } = {}) {
+  const gate =
+    config?.tuxler?.enabled !== false
+      ? getTuxlerNavGate(config?.tuxler?.navSlots ?? 3)
+      : null;
   let lastErr;
   for (let i = 1; i <= attempts; i += 1) {
-    if (shouldStop?.()) {
+    if (shouldStop?.() || signal?.aborted) {
       const err = new Error('Worker encerrando');
       err.name = 'AbortError';
       throw err;
     }
     try {
-      return await page.goto(url, { waitUntil: 'domcontentloaded' });
+      const go = () => page.goto(url, { waitUntil: 'domcontentloaded' });
+      return gate ? await gate.run(go, { signal, acquireTimeoutMs: 20_000 }) : await go();
     } catch (err) {
       lastErr = err;
-      if (!isTransientProxyError(err) || i === attempts) throw err;
+      if (shouldStop?.() || signal?.aborted || isAbortError(err)) throw err;
+      if (err.code === 'NAV_GATE_TIMEOUT' || !isTransientProxyError(err) || i === attempts) {
+        throw err;
+      }
       const brief = String(err.message || err).split('\n')[0];
       logger.warn(`Nav falhou (${brief}) — retry ${i}/${attempts - 1}`);
-      await sleepInterruptible(900 * i + randomInt(200, 900), { shouldStop });
+      const ssl = /ERR_SSL_PROTOCOL_ERROR/i.test(brief);
+      const waitMs = ssl
+        ? 2_400 * i + randomInt(400, 1_200)
+        : 900 * i + randomInt(200, 900);
+      await sleepInterruptible(waitMs, { shouldStop, signal });
     }
   }
   throw lastErr;
@@ -167,11 +180,19 @@ async function browsePage(page, url, logger, label, config, opts = {}) {
     });
     navVia = organic.via;
   } else {
-    resp = await gotoWithRetry(page, url, logger, { shouldStop: ctx.shouldStop });
+    resp = await gotoWithRetry(page, url, logger, {
+      shouldStop: ctx.shouldStop,
+      signal: ctx.signal,
+      config,
+    });
   }
 
   const status = resp ? resp.status() : null;
-  const redirectHops = await followClientRedirects(page, logger);
+  const redirectHops = await followClientRedirects(page, logger, {
+    config,
+    shouldStop: ctx.shouldStop,
+    signal: ctx.signal,
+  });
 
   const onIntermediate = isIntermediateHost(page.url());
   if (onIntermediate) {

@@ -6,7 +6,6 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { getProxyLaunchArgs, getTuxlerLaunchArgs } = require('./proxy');
 const { getStealthLaunchArgs } = require('./stealth');
-const { sleep } = require('../utils/sleep');
 
 puppeteer.use(StealthPlugin());
 const SYSTEM_CHROME_CANDIDATES = [
@@ -70,8 +69,10 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     args,
     ignoreDefaultArgs: ['--enable-automation'],
     defaultViewport: null,
-    // Necessário com vários proxies HTTP (CONNECT / cert / handshake).
     ignoreHTTPSErrors: true,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
   };
 
   const chromePath = resolveChromePath(config.chromeExecutablePath);
@@ -110,19 +111,27 @@ async function closeBrowser(browser, logger, { forceMs = 8_000 } = {}) {
   if (!browser) return;
   const proc = typeof browser.process === 'function' ? browser.process() : null;
   const pid = proc?.pid;
+  let forceTimer = null;
+  let forced = false;
 
   try {
     await Promise.race([
       browser.close(),
-      sleep(forceMs).then(() => {
-        logger.warn(`browser.close() > ${forceMs}ms — matando árvore de processos`);
-        if (pid) killProcessTree(pid, logger);
+      new Promise((resolve) => {
+        forceTimer = setTimeout(() => {
+          forced = true;
+          logger.warn(`browser.close() > ${forceMs}ms — matando árvore de processos`);
+          if (pid) killProcessTree(pid, logger);
+          resolve();
+        }, forceMs);
       }),
     ]);
-    logger.info('Browser encerrado');
+    if (!forced) logger.info('Browser encerrado');
   } catch (err) {
     logger.warn('Falha ao encerrar browser:', err.message);
     if (pid) killProcessTree(pid, logger);
+  } finally {
+    if (forceTimer) clearTimeout(forceTimer);
   }
 }
 module.exports = { launchBrowser, closeBrowser, killProcessTree, resolveChromePath };

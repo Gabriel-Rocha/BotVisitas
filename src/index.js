@@ -4,6 +4,7 @@ const { createBotSession } = require('./app/runBot');
 const { createBufferedLogger } = require('./dashboard/bufferedLogger');
 const { loadConfig } = require('./config');
 const { sleep } = require('./utils/sleep');
+const { installBenignPuppeteerHandlers } = require('./utils/puppeteerErrors');
 
 async function main() {
   const config = loadConfig();
@@ -28,6 +29,7 @@ async function main() {
     process.exit(0);
   };
 
+  installBenignPuppeteerHandlers(logger);
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 

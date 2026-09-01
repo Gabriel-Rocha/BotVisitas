@@ -136,6 +136,13 @@ body {
   margin-bottom: 1.5rem;
 }
 
+.status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -147,6 +154,44 @@ body {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.ram-pill {
+  text-transform: none;
+  letter-spacing: 0;
+  gap: 0.65rem;
+}
+
+.ram-pill-detail {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.ram-pill.level-warn {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.ram-pill.level-critical {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.metric-ram .ram-track {
+  margin-top: 0.55rem;
+}
+
+.ram-caption {
+  margin: 0.45rem 0 0;
+  font-size: 0.75rem;
+}
+
+.indicator-bar-fill.tone-warn {
+  background: var(--amber);
+}
+
+.indicator-bar-fill.tone-critical {
+  background: var(--danger);
 }
 
 .dot {

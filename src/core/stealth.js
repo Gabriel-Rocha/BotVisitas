@@ -2,6 +2,7 @@
 
 const { randomInt } = require('../utils/random');
 const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
+const { getTuxlerNavGate } = require('./navGate');
 
 /**
  * Ofuscação de visita — objetivo: cada acesso parecer navegação humana normal.
@@ -426,19 +427,26 @@ async function humanBrowsePause(page, dwellSec, { signal, shouldStop } = {}) {
 /**
  * Segue redirects de JS / meta refresh (ex.: AliExpress s.click mostrando <script> cru).
  */
-async function followClientRedirects(page, logger, { maxHops = 6 } = {}) {
+async function followClientRedirects(page, logger, { maxHops = 6, config, shouldStop, signal } = {}) {
   const hops = [];
+  const gate =
+    config?.tuxler?.enabled !== false
+      ? getTuxlerNavGate(config?.tuxler?.navSlots ?? 3)
+      : null;
+  const hopTimeout = Math.min(12_000, config?.navigationTimeoutMs || 30_000);
+
   for (let i = 0; i < maxHops; i += 1) {
+    if (shouldStop?.() || signal?.aborted) break;
     const before = page.url();
 
     // Espera redirect espontâneo (window.location / meta).
     try {
-      await Promise.race([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4_500 }),
-        sleep(2_200),
-      ]);
+      const navWait = page
+        .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4_500 })
+        .catch(() => null);
+      await Promise.race([navWait, sleep(2_200, { signal })]);
     } catch {
-      // timeout ok
+      // timeout / abort ok
     }
 
     let forced = null;
@@ -484,7 +492,10 @@ async function followClientRedirects(page, logger, { maxHops = 6 } = {}) {
     if (forced && forced.split('#')[0] !== before.split('#')[0]) {
       if (logger) logger.info(`Redirect cliente → ${forced}`);
       try {
-        await page.goto(forced, { waitUntil: 'domcontentloaded' });
+        const go = () =>
+          page.goto(forced, { waitUntil: 'domcontentloaded', timeout: hopTimeout });
+        if (gate) await gate.run(go, { signal, acquireTimeoutMs: 15_000 });
+        else await go();
         hops.push(forced);
         continue;
       } catch (err) {

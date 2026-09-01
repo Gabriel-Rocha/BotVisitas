@@ -99,6 +99,9 @@
 - [x] TuxlerVPN (Windows): rotação residencial gratuita por worker (mutex + PowerShell)
 - [x] Tor SOCKS bloqueado (9050/9150)
 - [x] Watchdog de RAM + restart periódico do Chromium (anti OOM overnight)
+- [x] TargetCloseError do stealth não derruba o processo (reuse page + ignore)
+- [x] Histórico local de egress Tuxler (`logs/tuxler-exits.json`)
+- [x] VISIT_MAX_SEC aborta o goto e solta o slot SOCKS; timer de closeBrowser não mata o Chromium novo
 
 ---
 

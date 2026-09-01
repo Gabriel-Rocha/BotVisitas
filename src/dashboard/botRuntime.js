@@ -1,6 +1,7 @@
 'use strict';
 
 const { createBotSession, publicStatusSnapshot } = require('../app/runBot');
+const { readMemorySnapshot, classifyPressure } = require('../core/memoryWatch');
 const { createBufferedLogger } = require('./bufferedLogger');
 const { loadConfig } = require('../config');
 const { getSafeConfig } = require('./configStore');
@@ -245,6 +246,19 @@ function getStatus() {
   const base = config || loadConfig();
   const snapshot = publicStatusSnapshot(base, loop, running);
   snapshot.runId = currentRunId;
+
+  if (!snapshot.stats?.memory) {
+    const raw = readMemorySnapshot();
+    snapshot.memory = {
+      ...raw,
+      level: classifyPressure(raw, {
+        warnPct: base.memoryWarnPct ?? 0.82,
+        criticalPct: base.memoryCriticalPct ?? 0.9,
+      }),
+    };
+  } else {
+    snapshot.memory = snapshot.stats.memory;
+  }
 
   if (!running) {
     snapshot.targetUrls = runtimeTargetUrls;
