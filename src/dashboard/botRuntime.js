@@ -227,8 +227,8 @@ async function stop() {
   if (runPromise) {
     await Promise.race([
       runPromise.catch(() => {}),
-      sleep(5_000).then(() => {
-        logger.warn('Workers ainda ativos após 5s — seguindo shutdown');
+      sleep(15_000).then(() => {
+        logger.warn('Workers ainda ativos após 15s — seguindo shutdown');
       }),
     ]);
     runPromise = null;

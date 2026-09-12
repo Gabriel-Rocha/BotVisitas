@@ -4,10 +4,13 @@ const { pick, randomInt } = require('../utils/random');
 const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
 const { isTransientProxyError } = require('../utils/netErrors');
 const { getTuxlerNavGate } = require('../core/navGate');
+const { isTuxlerTunnelOk, probeTuxlerSocks } = require('../core/proxy');
 const { isHeavyOfferHost } = require('../core/bandwidth');
 const {
   isIntermediateHost,
   classifyVisitQuality,
+  classifyClickTarget,
+  summarizeClickTargets,
   pickEntryUrl,
   hostOf,
 } = require('../core/visitQuality');
@@ -19,19 +22,31 @@ const {
   navigateLikeHuman,
   pickOrganicReferrer,
   openAsOrganicVisit,
+  pageUrl,
 } = require('../core/stealth');
 
 async function gotoWithRetry(page, url, logger, { attempts = 3, shouldStop, signal, config } = {}) {
-  const gate =
-    config?.tuxler?.enabled !== false
-      ? getTuxlerNavGate(config?.tuxler?.navSlots ?? 3)
-      : null;
+  const useTuxlerGate = config?.tuxler?.enabled === true;
+  const gate = useTuxlerGate ? getTuxlerNavGate(config?.tuxler?.navSlots || 1) : null;
   let lastErr;
   for (let i = 1; i <= attempts; i += 1) {
     if (shouldStop?.() || signal?.aborted) {
       const err = new Error('Worker encerrando');
       err.name = 'AbortError';
       throw err;
+    }
+    if (useTuxlerGate) {
+      if (!isTuxlerTunnelOk()) {
+        const err = new Error('Tuxler túnel saturado — adiando goto');
+        err.code = 'TUXLER_SOCKS_OFFLINE';
+        throw err;
+      }
+      const socks = await probeTuxlerSocks(config);
+      if (!socks.open) {
+        const err = new Error(`Tuxler SOCKS ${socks.host}:${socks.port} offline`);
+        err.code = 'TUXLER_SOCKS_OFFLINE';
+        throw err;
+      }
     }
     try {
       const go = () => page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -67,40 +82,100 @@ async function waitSettled(page, config) {
 async function readPageMeta(page) {
   let title = '';
   let bodyLen = 0;
+  let interactives = 0;
   try {
     title = await page.title();
-    bodyLen = await page.evaluate(() =>
-      document.body && document.body.innerText
-        ? document.body.innerText.trim().length
-        : 0
-    );
+    const info = await page.evaluate(() => {
+      const text =
+        document.body && document.body.innerText
+          ? document.body.innerText.trim().length
+          : 0;
+      const nodes = document.querySelectorAll(
+        'a[href], button, [role="button"], iframe, input[type="submit"], [onclick], .btn, [data-cta], [data-ad]'
+      );
+      return { text, interactives: nodes.length };
+    });
+    bodyLen = info.text || 0;
+    interactives = info.interactives || 0;
   } catch {
     // ignore
   }
-  return { title, bodyLen, finalUrl: page.url() };
+  return { title, bodyLen, interactives, finalUrl: pageUrl(page) };
 }
 
-async function collectInternalLinks(page, hostname) {
-  return page.evaluate((host) => {
-    const seen = new Set();
-    const out = [];
-    for (const a of document.querySelectorAll('a[href]')) {
-      let u;
-      try {
-        u = new URL(a.getAttribute('href'), location.href);
-      } catch {
-        continue;
-      }
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
-      if (u.hostname !== host) continue;
-      const clean = `${u.origin}${u.pathname}${u.search}`;
-      if (seen.has(clean)) continue;
-      if (u.pathname === location.pathname && u.search === location.search) continue;
-      seen.add(clean);
-      out.push(clean);
+/**
+ * Proxies lentos / SPA: espera UI rápido; se ficar 0/0, desiste cedo (não “trava” 12s).
+ */
+async function waitForPageReady(page, config, waitOpts = {}) {
+  const hardMax = Math.min(5_500, Math.max(2_500, Number(config?.pageReadyMs) || 5_000));
+  const earlyBailMs = Math.min(2_200, hardMax);
+  const deadline = Date.now() + hardMax;
+  const earlyAt = Date.now() + earlyBailMs;
+  let last = await readPageMeta(page);
+  while (Date.now() < deadline) {
+    if (waitOpts.shouldStop?.() || waitOpts.signal?.aborted) break;
+    if (last.bodyLen >= 60) return last;
+    if (last.interactives >= 1 && (last.bodyLen >= 20 || last.title)) return last;
+    if (last.interactives >= 3) return last;
+    // Blank smartlink (dutiful-hate etc.): não queima o ciclo inteiro.
+    if (Date.now() >= earlyAt && last.bodyLen < 15 && last.interactives < 1 && !last.title) {
+      return last;
     }
-    return out;
-  }, hostname);
+    await sleepInterruptible(280, waitOpts);
+    last = await readPageMeta(page);
+  }
+  return last;
+}
+
+async function collectPageLinks(page, hostname, { allowExternal = true } = {}) {
+  return page.evaluate(
+    (host, allowExt) => {
+      const junkHref =
+        /privacy|terms|cookie|gdpr|mailto:|tel:|javascript:|play\.google|apps\.apple|accounts\.google|facebook\.com|twitter\.com|instagram\.com|linkedin\.com|youtube\.com\/redirect/i;
+      const junkText =
+        /privacy|terms|cookie|sign in|log in|subscribe|share|report|back to home|learn more/i;
+      const seen = new Set();
+      const same = [];
+      const external = [];
+
+      for (const a of document.querySelectorAll('a[href]')) {
+        let u;
+        try {
+          u = new URL(a.getAttribute('href'), location.href);
+        } catch {
+          continue;
+        }
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
+        const clean = `${u.origin}${u.pathname}${u.search}`;
+        if (seen.has(clean)) continue;
+        if (u.pathname === location.pathname && u.search === location.search) continue;
+        if (junkHref.test(clean)) continue;
+        const text = (a.innerText || a.getAttribute('aria-label') || '').trim();
+        if (text && junkText.test(text) && text.length < 40) continue;
+
+        const r = a.getBoundingClientRect();
+        const style = window.getComputedStyle(a);
+        if (r.width < 8 || r.height < 8) continue;
+        if (style.visibility === 'hidden' || style.display === 'none') continue;
+
+        seen.add(clean);
+        if (u.hostname === host) {
+          same.push(clean);
+        } else if (allowExt) {
+          external.push(clean);
+        }
+      }
+      // Internos primeiro; externos (ofertas) depois.
+      return [...same, ...external];
+    },
+    hostname,
+    allowExternal
+  );
+}
+
+/** @deprecated alias */
+async function collectInternalLinks(page, hostname) {
+  return collectPageLinks(page, hostname, { allowExternal: false });
 }
 
 function resolveClickBudget(config) {
@@ -122,41 +197,59 @@ function resolveClickBudget(config) {
 
 async function runEngagement(page, config, logger, ctx, { onIntermediate, budget, fast }) {
   const mode = resolveClickMode(config);
-  let engage = { clicks: [], clickCount: 0, verifiedCount: 0 };
+  let engage = { clicks: [], clickCount: 0, verifiedCount: 0, urlChanged: false };
 
   if (onIntermediate || budget <= 0) {
     return engage;
   }
 
-  // v1 primeiro: clique no centro logo após a página carregar (cada worker, N vezes).
+  // legacy/hybrid: centro só se ainda estiver no modo antigo.
   if (mode === 'legacy' || mode === 'hybrid') {
     engage = await legacyCenterClicks(page, config, logger, {
       count: budget,
       followRedirects: true,
     });
-    if (mode === 'legacy' || engage.clickCount > 0) {
+    const verified = Number(engage.verifiedCount) || 0;
+    if (mode === 'legacy') {
+      return engage;
+    }
+    if (mode === 'hybrid' && verified > 0) {
       return engage;
     }
   }
 
-  logger.info(`Engajando página (até ${budget} click(s) CTR verificados)...`);
-  engage = await humanEngage(page, {
-    maxClicks: budget,
+  // Default (engage/links): CTA / ad / âncora de oferta — sem centro e sem “passear” em artigo.
+  const remaining = Math.max(1, budget - (Number(engage.verifiedCount) || 0));
+  logger.info(`Engajando CTA/ads (até ${remaining} click(s) verificados)...`);
+  const engage2 = await humanEngage(page, {
+    maxClicks: remaining,
     clickSelector: config.clickSelector,
     logger,
     fast,
     maxMs: config.engageMaxMs ?? 25_000,
-    requireUrlChange: Boolean(config.engageRequireUrlChange),
+    requireUrlChange: config.engageRequireUrlChange !== false,
+    // Último recurso: centro só se nada verificou (interstitial full-bleed).
+    allowCenterFallback: true,
+    preferAnchors: false,
+    preferOfferLinks: true,
     ...ctx,
   });
 
-  return engage;
+  const mergedClicks = [...(engage.clicks || []), ...(engage2.clicks || [])];
+  return {
+    clicks: mergedClicks,
+    clickCount: mergedClicks.length,
+    verifiedCount:
+      (Number(engage.verifiedCount) || 0) + (Number(engage2.verifiedCount) || 0),
+    urlChanged: Boolean(engage.urlChanged) || mergedClicks.some((c) => c.urlChanged),
+  };
 }
 
 function resolveClickMode(config) {
-  const raw = (config.clickMode || 'legacy').trim().toLowerCase();
+  const raw = (config.clickMode || 'engage').trim().toLowerCase();
+  if (raw === 'links' || raw === 'navigate') return 'engage';
   if (['legacy', 'engage', 'hybrid'].includes(raw)) return raw;
-  return 'legacy';
+  return 'engage';
 }
 
 async function browsePage(page, url, logger, label, config, opts = {}) {
@@ -194,60 +287,105 @@ async function browsePage(page, url, logger, label, config, opts = {}) {
     signal: ctx.signal,
   });
 
-  const onIntermediate = isIntermediateHost(page.url());
+  const onIntermediate = isIntermediateHost(pageUrl(page));
   if (onIntermediate) {
-    logger.info(`Redirect parou em host intermediário (${hostOf(page.url()) || '?'}) — sem cliques`);
+    logger.info(
+      `Redirect parou em host intermediário (${hostOf(pageUrl(page)) || '?'}) — sem cliques`
+    );
   }
-  const budget = onIntermediate ? 0 : resolveClickBudget(config);
 
-  // v1: clique logo após goto + redirects iniciais (antes do dwell longo).
-  await sleep(randomInt(200, 600));
-  const engage = await runEngagement(page, config, logger, waitOpts, {
-    onIntermediate,
-    budget,
-    fast: (config.dwellMaxSec ?? 9) <= 4,
-  });
-
+  // Impressão primeiro: espera a página/ads carregarem antes do CTR.
   await waitSettled(page, config);
+  let preMeta = await waitForPageReady(page, config, waitOpts);
+  const challengeTitle = /^(un momento|captcha|just a moment|attention required)/i.test(
+    String(preMeta.title || '').trim()
+  );
+  // Só trata como vazia se NÃO há CTA/iframe/links — landings de ad às vezes têm pouco texto.
+  const looksEmpty =
+    !onIntermediate &&
+    preMeta.interactives < 1 &&
+    (challengeTitle || preMeta.bodyLen < 40) &&
+    (!preMeta.title || challengeTitle);
+  if (looksEmpty) {
+    logger.warn(
+      `Página sem UI (title="${preMeta.title}" texto≈${preMeta.bodyLen} interativos=${preMeta.interactives}) — sem cliques`
+    );
+  } else if (preMeta.bodyLen < 80) {
+    logger.info(
+      `UI pronta com pouco texto (texto≈${preMeta.bodyLen} interativos=${preMeta.interactives}) — engajando mesmo assim`
+    );
+  }
 
-  const dwellBudget = onIntermediate
-    ? randomInt(1, 2)
-    : randomInt(config.dwellMinSec ?? 2, config.dwellMaxSec ?? 3);
+  const budget = onIntermediate || looksEmpty ? 0 : resolveClickBudget(config);
+
+  const dwellBudget =
+    onIntermediate || looksEmpty
+      ? randomInt(1, 2)
+      : randomInt(config.dwellMinSec ?? 5, config.dwellMaxSec ?? 9);
   const dwellFirst = await humanBrowsePause(page, dwellBudget, waitOpts);
 
-  const tailBudget = onIntermediate
-    ? 0
-    : randomInt(config.dwellTailMinSec ?? 1, config.dwellTailMaxSec ?? 2);
+  // Origem do clique — usada para separar navegação interna de destino de ad.
+  const originUrl = pageUrl(page);
+
+  const fastEngage = (config.dwellMaxSec ?? 9) <= 4;
+  const engage = await runEngagement(page, config, logger, waitOpts, {
+    onIntermediate: onIntermediate || looksEmpty,
+    budget,
+    fast: fastEngage,
+  });
+
+  const tailBudget =
+    onIntermediate || looksEmpty
+      ? 0
+      : randomInt(config.dwellTailMinSec ?? 3, config.dwellTailMaxSec ?? 6);
   const dwellLast = await humanBrowsePause(page, tailBudget, waitOpts);
   const dwellSec = dwellFirst + dwellLast;
 
+  const clicks = (engage.clicks || []).map((click) => ({
+    ...click,
+    target: click.target || classifyClickTarget(click, originUrl),
+  }));
+  const clickTargets = summarizeClickTargets(clicks, originUrl);
+
+  const verifiedClicks =
+    Number(engage.verifiedCount) || clicks.filter((c) => c.verified).length;
+  const performedClicks = Number(engage.clickCount) || 0;
+
   logger.info(
-    `Lendo página (~${dwellSec}s, via=${navVia}, cliques=${engage.clickCount})...`
+    `Lendo página (~${dwellSec}s, via=${navVia}, cliques=${performedClicks}, verificados=${verifiedClicks}` +
+      ` [anúncio=${clickTargets.ad} site=${clickTargets.internal} externo=${clickTargets.external}])...`
   );
+  if (verifiedClicks > 0 && clickTargets.ad === 0) {
+    logger.warn(
+      'Nenhum clique caiu em unidade de anúncio — navegação interna/externa não gera CTR de ad'
+    );
+  }
 
   const meta = await readPageMeta(page);
-  const performedClicks = engage.clickCount ?? 0;
   const quality = classifyVisitQuality(meta.finalUrl, {
+    title: meta.title,
     bodyLen: meta.bodyLen,
-    verifiedClicks: performedClicks,
+    verifiedClicks,
     clickCount: performedClicks,
-    clicks: engage.clicks,
+    clicks,
   });
 
   logger.info(
-    `Resposta: status=${status ?? 'n/a'} | qualidade=${quality} | title="${meta.title}" | final=${meta.finalUrl} | texto≈${meta.bodyLen} chars | cliques=${performedClicks}`
+    `Resposta: status=${status ?? 'n/a'} | qualidade=${quality} | title="${meta.title}" | final=${meta.finalUrl} | texto≈${meta.bodyLen} chars | ui=${meta.interactives} | cliques=${performedClicks} | verificados=${verifiedClicks}`
   );
-  if (!meta.title && meta.bodyLen < 40) {
-    logger.warn('Página quase vazia (title vazio + pouco texto).');
+  if (!meta.title && meta.bodyLen < 40 && meta.interactives < 1) {
+    logger.warn('Página quase vazia (title vazio + pouco texto + sem UI).');
   }
   return {
     status,
     navVia,
     redirectHops,
     quality,
-    clicks: engage.clicks,
-    clickCount: engage.clickCount,
-    verifiedClicks: performedClicks,
+    clicks,
+    clickCount: performedClicks,
+    verifiedClicks,
+    clickTargets,
+    emptyUi: Boolean(looksEmpty || (meta.interactives < 1 && meta.bodyLen < 40)),
     ...meta,
   };
 }
@@ -282,21 +420,22 @@ async function runSingleVisit(page, { config, logger, entryUrl, shouldStop, sign
   }
 
   if (extraPages > 0 && isHeavyOfferHost(browseHost)) {
+    const capped = Math.min(extraPages, 1);
     logger.info(
-      `Host oferta pesada (${browseHost}) — pulando navegação interna (economiza banda)`
+      `Host oferta pesada (${browseHost}) — limitando navegação a ${capped} link(s)`
     );
-    extraPages = 0;
+    extraPages = capped;
   }
 
-  let links = extraPages > 0 ? await collectInternalLinks(page, browseHost) : [];
-  if (extraPages > 0) logger.info(`Links internos encontrados: ${links.length}`);
+  let links = extraPages > 0 ? await collectPageLinks(page, browseHost, { allowExternal: true }) : [];
+  if (extraPages > 0) logger.info(`Links na página encontrados: ${links.length}`);
   else if (pagesMax === 0) logger.info('BROWSE_PAGES=0 — só a entrada (economiza banda)');
 
   let navigated = 0;
   for (let i = 0; i < extraPages; i += 1) {
-    const candidates = links.filter((href) => !visited.has(href));
+    const candidates = links.filter((href) => !visited.has(href.split('#')[0]));
     if (!candidates.length) {
-      logger.info('Sem mais links internos novos — encerrando navegação.');
+      logger.info('Sem mais links novos na página — encerrando navegação.');
       break;
     }
 
@@ -316,7 +455,7 @@ async function runSingleVisit(page, { config, logger, entryUrl, shouldStop, sign
       } catch {
         // keep
       }
-      const more = await collectInternalLinks(page, browseHost);
+      const more = await collectPageLinks(page, browseHost, { allowExternal: true });
       links = [...new Set([...links, ...more])];
     } catch (err) {
       logger.warn(`Falha ao abrir ${next}: ${err.message}`);
@@ -324,16 +463,20 @@ async function runSingleVisit(page, { config, logger, entryUrl, shouldStop, sign
   }
 
   const performedClicks = allClicks.length;
+  const verifiedClicks = allClicks.filter((c) => c.verified).length;
+  // Cada clique já carrega `target`; o originUrl não é mais necessário aqui.
+  const clickTargets = summarizeClickTargets(allClicks);
   const finalUrl = path[path.length - 1] || first.finalUrl;
   const quality = classifyVisitQuality(finalUrl, {
+    title: first.title,
     bodyLen: first.bodyLen,
-    verifiedClicks: performedClicks,
+    verifiedClicks,
     clickCount: performedClicks,
     clicks: allClicks,
   });
 
   return {
-    ok: true,
+    ok: quality !== 'intermediate',
     quality,
     meta: {
       entryUrl,
@@ -346,8 +489,11 @@ async function runSingleVisit(page, { config, logger, entryUrl, shouldStop, sign
       finalHost: hostOf(finalUrl),
       quality,
       clickCount: performedClicks,
-      verifiedClicks: performedClicks,
+      verifiedClicks,
+      clickTargets,
       clicks: allClicks.slice(0, 20),
+      emptyUi: Boolean(first.emptyUi),
+      bodyLen: first.bodyLen,
     },
   };
 }

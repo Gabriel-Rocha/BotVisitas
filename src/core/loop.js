@@ -4,16 +4,29 @@ const { createWorker } = require('./worker');
 const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices');
 const { sleep } = require('../utils/sleep');
 const { createTuxlerLease, assertTuxlerReady, validateTuxlerActive } = require('./tuxler');
-const { FREE_PLAN_MAX, resetTuxlerSocksCache } = require('./proxy');
-const { resetTuxlerNavGate } = require('./navGate');
+const {
+  FREE_PLAN_MAX,
+  resetTuxlerSocksCache,
+  createHttpProxyLease,
+  parseCountryList,
+} = require('./proxy');
+const { resetTuxlerNavGate, getTuxlerNavGate } = require('./navGate');
 const { clearGeoCache } = require('./geo');
 const { createMemoryWatch } = require('./memoryWatch');
 
 function resolveConcurrency(config, strategy, logger) {
   const n = Math.max(1, Math.min(config.concurrency || 1, FREE_PLAN_MAX));
   const needsBrowser = strategy.requiresBrowser !== false;
+  const httpProxyOn = Boolean(config.proxy?.enabled);
   const tuxlerOn = config.tuxler?.enabled;
   const rotMode = (config.tuxler?.rotateMode || 'skip').toLowerCase();
+
+  if (needsBrowser && httpProxyOn) {
+    logger.info(
+      `Proxy HTTP: até ${n} workers com sticky exclusivo (sem SOCKS único do Tuxler).`
+    );
+    return n;
+  }
 
   if (needsBrowser && tuxlerOn && rotMode !== 'skip' && n > 1) {
     logger.warn(
@@ -22,8 +35,8 @@ function resolveConcurrency(config, strategy, logger) {
   }
 
   if (needsBrowser && tuxlerOn && rotMode === 'skip' && n > 1) {
-    logger.info(
-      `Tuxler skip: ${n} workers em paralelo (mesmo IP VPN; cada um visita links à parte).`
+    logger.warn(
+      `Tuxler: ${n} workers no MESMO SOCKS 23321. Para 12 IPs paralelos use PROXY_ENABLED=true + PROXY_LIST_URL.`
     );
   }
 
@@ -71,6 +84,22 @@ function createLoop({ config, strategy, logger }) {
     onCritical: () => recycleAllBrowsers('watchdog-ram'),
   });
 
+  let stallTimer = null;
+
+  /** Vigia workers sem iteração — um await pendurado não pode custar horas de run. */
+  function startStallWatch() {
+    const maxMs = Math.max(60, Number(config.workerStallSec) || 300) * 1000;
+    stallTimer = setInterval(() => {
+      if (stopping) return;
+      for (const worker of workers) {
+        Promise.resolve(worker.kickIfStalled(maxMs)).catch((err) => {
+          logger.warn(`Watchdog de travamento falhou em w${worker.workerId}:`, err.message);
+        });
+      }
+    }, 30_000);
+    stallTimer.unref?.();
+  }
+
   async function recycleAllBrowsers(reason = 'watchdog-ram') {
     if (stopping || !workers.length) return;
     if (recycleInFlight) return recycleInFlight;
@@ -105,7 +134,18 @@ function createLoop({ config, strategy, logger }) {
 
     deviceSummary = summarizeDevices(types);
 
-    if (config.tuxler?.enabled && strategy.requiresBrowser !== false) {
+    if (config.proxy?.enabled && strategy.requiresBrowser !== false) {
+      clearGeoCache();
+      proxyLease = await createHttpProxyLease(config, logger);
+      const poolSize = proxyLease.size || 0;
+      if (types.length > poolSize) {
+        logger.warn(
+          `CONCURRENCY=${types.length} > PROXY_MAX/pool=${poolSize} — truncando workers ao pool`
+        );
+        types.length = poolSize;
+        deviceSummary = summarizeDevices(types);
+      }
+    } else if (config.tuxler?.enabled && strategy.requiresBrowser !== false) {
       resetTuxlerSocksCache();
       resetTuxlerNavGate();
       clearGeoCache();
@@ -121,12 +161,34 @@ function createLoop({ config, strategy, logger }) {
 
     deviceSummary = summarizeDevices(types);
 
+    // Nav gate só no Tuxler (SOCKS único). Proxy HTTP = 1 túnel por worker.
+    const usingTuxler = Boolean(config.tuxler?.enabled && proxyLease);
+    const configuredSlots = Number(config.tuxler?.navSlots) || 0;
+    const navSlots = usingTuxler
+      ? configuredSlots > 0
+        ? configuredSlots
+        : Math.min(4, types.length)
+      : types.length;
+    if (config.tuxler) config.tuxler.navSlots = navSlots;
+    if (usingTuxler) {
+      resetTuxlerNavGate();
+      getTuxlerNavGate(navSlots);
+      if (configuredSlots === 0 && types.length > 4) {
+        logger.warn(
+          `Tuxler: limitando gotos simultâneos a ${navSlots} (SOCKS único). ` +
+            'Para 12 navegando juntos: PROXY_ENABLED=true + PROXY_LIST_URL / PROXY_SERVER.'
+          );
+      }
+    }
+
     const mixLabel = Object.entries(deviceSummary)
       .map(([k, v]) => `${k}:${v}`)
       .join(', ');
 
     logger.info(
-      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | tuxler=${Boolean(config.tuxler?.enabled && proxyLease)} | restartEvery=${config.browserRestartEvery || 0} | navSlots=${config.tuxler?.navSlots || 3}`
+      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | ` +
+        `proxyHttp=${Boolean(config.proxy?.enabled && proxyLease)} | tuxler=${usingTuxler} | ` +
+        `restartEvery=${config.browserRestartEvery || 0} | navSlots=${navSlots}`
     );
     if (process.platform === 'win32') {
       logger.info(
@@ -135,8 +197,12 @@ function createLoop({ config, strategy, logger }) {
     }
     memoryWatch.start();
 
+    const countryCycle = parseCountryList(config.workerCountries || '');
     for (let i = 0; i < types.length; i += 1) {
       const { type, profile } = getProfile(config.deviceProfiles, types[i]);
+      const preferredCountry =
+        slots[i]?.country ||
+        (countryCycle.length ? countryCycle[i % countryCycle.length] : null);
       workers.push(
         createWorker({
           workerId: i,
@@ -146,10 +212,12 @@ function createLoop({ config, strategy, logger }) {
           proxyLease,
           deviceType: type,
           deviceProfile: profile,
-          preferredCountry: slots[i]?.country || null,
+          preferredCountry,
         })
       );
     }
+
+    startStallWatch();
 
     const staggerMs = Math.max(
       0,
@@ -172,6 +240,7 @@ function createLoop({ config, strategy, logger }) {
     if (stopping) return;
     stopping = true;
     memoryWatch.stop();
+    if (stallTimer) clearInterval(stallTimer);
     logger.info('Encerrando workers...', JSON.stringify(getStats()));
     await Promise.race([
       Promise.all(workers.map((w) => w.stop())),
@@ -191,6 +260,9 @@ function createLoop({ config, strategy, logger }) {
       intermediate: parts.reduce((s, p) => s + (p.intermediate || 0), 0),
       errors: parts.reduce((s, p) => s + p.errors, 0),
       clicks: parts.reduce((s, p) => s + (p.clicks || 0), 0),
+      adClicks: parts.reduce((s, p) => s + (p.adClicks || 0), 0),
+      siteClicks: parts.reduce((s, p) => s + (p.siteClicks || 0), 0),
+      externalClicks: parts.reduce((s, p) => s + (p.externalClicks || 0), 0),
       iterations: parts.reduce((s, p) => s + p.iterations, 0),
       browserRestarts: parts.reduce((s, p) => s + (p.browserRestarts || 0), 0),
       devices: deviceSummary,

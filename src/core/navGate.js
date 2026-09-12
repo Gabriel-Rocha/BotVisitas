@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * Limita gotos simultâneos pelo SOCKS do Tuxler.
- * 8–10 Chromiums no mesmo 127.0.0.1:23321 quebram o handshake TLS.
+ * Gate opcional de gotos no SOCKS Tuxler.
+ * Por padrão o paralelismo = número de workers (CONCURRENCY).
+ * TUXLER_NAV_SLOTS>0 só se quiser um teto menor que os workers.
  */
 
 function createNavGate(maxConcurrent = 3) {

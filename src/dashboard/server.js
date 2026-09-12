@@ -84,8 +84,16 @@ async function shutdown(signal) {
   } finally {
     clearTimeout(watchdog);
     if (server) {
-      server.close(() => process.exit(0));
-      hardExit(0, 'server.close() lento — saindo');
+      let closed = false;
+      server.close(() => {
+        closed = true;
+        process.exit(0);
+      });
+      // Antes o warn saía sempre; agora só se o close realmente travar.
+      setTimeout(() => {
+        if (!closed) hardExit(0, 'server.close() lento — saindo');
+        else process.exit(0);
+      }, 2_000).unref();
     } else {
       process.exit(0);
     }

@@ -11,6 +11,7 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const { markTuxlerTunnelDown, markTuxlerTunnelUp } = require('./proxy');
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
 const LOOKUP_TIMEOUT_MS = 12_000;
@@ -349,15 +350,34 @@ async function lookupGeoViaSocks(socksHost, socksPort) {
 /**
  * Mede egress Tuxler: SOCKS do app (VPN) ou IP local se SOCKS offline.
  */
-async function lookupTuxlerEgress({ socksHost, socksPort, socksOpen, logger = null } = {}) {
+async function lookupTuxlerEgress({
+  socksHost,
+  socksPort,
+  socksOpen,
+  logger = null,
+  allowLocalFallback = true,
+} = {}) {
   if (socksOpen && socksHost && socksPort) {
     try {
       const viaSocks = await lookupGeoViaSocks(socksHost, socksPort);
       viaSocks.viaSocks = true;
+      markTuxlerTunnelUp();
       return viaSocks;
     } catch (err) {
-      logger?.warn?.(`Geo via SOCKS falhou (${err.message}) — tentando IP local`);
+      markTuxlerTunnelDown();
+      logger?.warn?.(`Geo via SOCKS falhou (${err.message}) — túnel Tuxler saturado`);
+      if (!allowLocalFallback) {
+        const wrapped = new Error(err.message || 'Timeout geo via SOCKS');
+        wrapped.code = 'TUXLER_SOCKS_OFFLINE';
+        throw wrapped;
+      }
+      logger?.warn?.('Tentando IP local (TUXLER_REQUIRE_ACTIVE=false)');
     }
+  } else if (!allowLocalFallback) {
+    markTuxlerTunnelDown();
+    const wrapped = new Error('Tuxler SOCKS offline');
+    wrapped.code = 'TUXLER_SOCKS_OFFLINE';
+    throw wrapped;
   }
 
   const local = await lookupGeo(null);

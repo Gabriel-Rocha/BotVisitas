@@ -1,11 +1,13 @@
 'use strict';
 
-const { launchBrowser, closeBrowser } = require('./browser');
+const { launchBrowser, closeBrowser, killProcessTree } = require('./browser');
 const { createSession, recreateSession } = require('./session');
 const { resolveSessionLocale } = require('./geo');
 const { randomInt } = require('../utils/random');
 const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
 const { isTransientProxyError } = require('../utils/netErrors');
+const { TuxlerInactiveError } = require('./tuxler');
+const { waitForTuxlerSocks, resetTuxlerSocksCache } = require('./proxy');
 
 /**
  * Um worker = 1 Chromium (+ 1 proxy exclusivo se houver lease) + 1 perfil de device.
@@ -33,7 +35,12 @@ function createWorker({
     offers: 0,
     intermediate: 0,
     errors: 0,
+    lastProgressAt: Date.now(),
     clicks: 0,
+    // Cliques verificados por destino — CTR de ad não se mistura com link do site.
+    adClicks: 0,
+    siteClicks: 0,
+    externalClicks: 0,
     browserRestarts: 0,
     proxyLabel: null,
     timezoneId: null,
@@ -50,6 +57,10 @@ function createWorker({
   let captureInProgress = null;
   let lastPreview = null;
   let recycleRequested = null;
+  /** Mutex: evita double-close / Chromium órfão sob watchdog + tick. */
+  let recycling = null;
+  /** Conta visitas neste Chromium (ok + erro) p/ BROWSER_RESTART_EVERY. */
+  let visitsSinceBrowserStart = 0;
 
   function log(level, ...args) {
     logger[level](prefix, ...args);
@@ -59,14 +70,14 @@ function createWorker({
     if (!proxyLease) return null;
     const proxy = await proxyLease.acquire(preferredCountry);
     stats.proxyLabel = proxy.label;
-    log('info', `Tuxler adquirido: ${proxy.label}`);
+    log('info', `Proxy adquirido: ${proxy.label}`);
     return proxy;
   }
 
   function releaseProxy() {
     if (!proxyLease || !activeProxy) return;
     proxyLease.release(activeProxy);
-    log('info', `Tuxler liberado: ${activeProxy.label}`);
+    log('info', `Proxy liberado: ${activeProxy.label}`);
     activeProxy = null;
     stats.proxyLabel = null;
   }
@@ -81,7 +92,19 @@ function createWorker({
   async function resolveLocaleForProxy(proxy) {
     const hints = await resolveSessionLocale({
       egressGeo: proxy?.geo || null,
-      proxy: proxy?.ip ? { host: proxy.ip, label: proxy.label } : null,
+      // HTTP/SOCKS: passa o endpoint completo (auth) para medir egress via proxy.
+      proxy: proxy?.isTuxler
+        ? null
+        : proxy
+          ? {
+              host: proxy.host,
+              port: proxy.port,
+              username: proxy.username,
+              password: proxy.password,
+              label: proxy.label,
+              protocol: proxy.protocol,
+            }
+          : null,
       fallbackTimezone: config.stealth?.timezoneId || 'UTC',
       fallbackLocale: config.stealth?.locale || 'en-US',
       enabled: config.stealth?.geoTz !== false,
@@ -95,10 +118,24 @@ function createWorker({
     stats.timezoneId = hints.timezoneId;
     stats.locale = hints.locale;
     stats.geoCountry = hints.countryCode;
+    // Label do slot é só hint do .env; mostra a geo real do egress.
+    if (proxy && hints.countryCode) {
+      stats.proxyLabel = `${proxy.host}:${proxy.port} (${String(hints.countryCode).toLowerCase()})`;
+    }
     return hints;
   }
 
   async function ensureBrowser() {
+    if (!needsBrowser) return;
+    if (recycling) await recycling;
+    await startBrowser();
+  }
+
+  /**
+   * Sobe Chromium + sessão. Não espera `recycling`: é chamada de dentro dele,
+   * e aguardar ali travava o worker para sempre (deadlock circular).
+   */
+  async function startBrowser() {
     if (!needsBrowser) return;
     if (browser && browser.isConnected()) return;
 
@@ -108,6 +145,8 @@ function createWorker({
       info: (...a) => log('info', ...a),
       warn: (...a) => log('warn', ...a),
     });
+    browser = null;
+    page = null;
 
     let localeHints;
     if (!activeProxy && proxyLease) {
@@ -124,11 +163,12 @@ function createWorker({
         warn: (...a) => log('warn', ...a),
         debug: (...a) => log('debug', ...a),
       },
-      null,
+      activeProxy,
       { lang: localeHints.locale }
     );
 
     browser = launched.browser;
+    visitsSinceBrowserStart = 0;
     page = await createSession(
       browser,
       config,
@@ -137,7 +177,7 @@ function createWorker({
         warn: (...a) => log('warn', ...a),
         debug: (...a) => log('debug', ...a),
       },
-      null,
+      activeProxy,
       device,
       localeHints
     );
@@ -145,32 +185,50 @@ function createWorker({
 
   async function recycleBrowser(reason = 'periódico') {
     if (!needsBrowser) return;
+    if (recycling) return recycling;
 
-    log('info', `Reciclando Chromium (${reason}) #${stats.iterations}`);
-    await closeBrowser(browser, {
-      info: (...a) => log('info', ...a),
-      warn: (...a) => log('warn', ...a),
-      debug: (...a) => log('debug', ...a),
-    });
-    browser = null;
-    page = null;
-    lastPreview = null;
+    recycling = (async () => {
+      log('info', `Reciclando Chromium (${reason}) #${stats.iterations}`);
+      const closing = browser;
+      browser = null;
+      page = null;
+      lastPreview = null;
+      await closeBrowser(closing, {
+        info: (...a) => log('info', ...a),
+        warn: (...a) => log('warn', ...a),
+        debug: (...a) => log('debug', ...a),
+      });
 
-    const tuxlerSkip =
-      config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
-    if (proxyLease && !tuxlerSkip) {
-      releaseProxy();
-      try {
-        await acquireUsableProxy();
-      } catch (err) {
-        log('warn', 'Falha ao rotacionar Tuxler no restart — tentando de novo:', err.message);
-        await sleep(2000);
-        await acquireUsableProxy();
+      const forceRotate = reason === 'empty-page';
+      const tuxlerSkip =
+        config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
+      const keepHttpSticky = Boolean(config.proxy?.enabled) && !forceRotate;
+      if (proxyLease && ((!tuxlerSkip && !keepHttpSticky) || forceRotate)) {
+        releaseProxy();
+        try {
+          await acquireUsableProxy();
+        } catch (err) {
+          log('warn', 'Falha ao rotacionar proxy no restart — tentando de novo:', err.message);
+          await sleep(2000);
+          await acquireUsableProxy();
+        }
       }
-    }
 
-    stats.browserRestarts += 1;
-    await ensureBrowser();
+      stats.browserRestarts += 1;
+      if (!stopping) {
+        try {
+          await startBrowser();
+        } catch (err) {
+          log('warn', `Relançar Chromium falhou (${err.message}) — nova tentativa na próxima visita`);
+          browser = null;
+          page = null;
+        }
+      }
+    })().finally(() => {
+      recycling = null;
+    });
+
+    return recycling;
   }
 
   async function restartBrowserWithNewProxy() {
@@ -178,24 +236,47 @@ function createWorker({
   }
 
   async function maybeRestartBrowser() {
-    if (!needsBrowser) return;
-    const every = config.browserRestartEvery;
-    if (!every || every <= 0) return;
-    if (stats.iterations === 0 || stats.iterations % every !== 0) return;
+    if (!needsBrowser || stopping) return;
+    const base = Number(config.browserRestartEvery) || 0;
+    if (!base || base <= 0) return;
+    // Jitter por worker — evita 12 Chromiums reiniciando juntos (parece “travado”).
+    const every = base + (workerId % 7);
+    if (visitsSinceBrowserStart < every) return;
     await recycleBrowser('periódico');
   }
 
+  /**
+   * Watchdog RAM: aborta a visita e mata o Chromium na hora
+   * (antes só setava flag e esperava o fim da visita = RAM seguia subindo).
+   */
   async function forceRecycleBrowser(reason = 'watchdog-ram') {
     if (!needsBrowser) return;
-    recycleRequested = reason;
-    if (!page || page.isClosed()) {
+    recycleRequested = null;
+    abortController?.abort();
+    if (page && !page.isClosed()) {
+      try {
+        await page.stopLoading();
+      } catch {
+        // ignore
+      }
+    }
+    await recycleBrowser(reason);
+  }
+
+  async function afterVisitHousekeeping() {
+    if (recycling) await recycling;
+    visitsSinceBrowserStart += 1;
+    if (recycleRequested) {
+      const reason = recycleRequested;
       recycleRequested = null;
       await recycleBrowser(reason);
+      return;
     }
+    await maybeRestartBrowser();
   }
 
   async function releaseTuxlerTurn() {
-    if (!config.tuxler?.enabled || !proxyLease) return;
+    if (!proxyLease) return;
     await closeBrowser(browser, {
       info: (...a) => log('info', ...a),
       warn: (...a) => log('warn', ...a),
@@ -204,6 +285,59 @@ function createWorker({
     page = null;
     sessionLocale = null;
     releaseProxy();
+  }
+
+  async function recoverPage(reason) {
+    if (!browser || !browser.isConnected()) {
+      log('warn', `${reason} — Chromium morto, reciclando (sem soltar Tuxler)`);
+      await recycleBrowser(reason);
+      return;
+    }
+    const sessionLog = {
+      info: (...a) => log('info', ...a),
+      debug: (...a) => log('debug', ...a),
+    };
+    try {
+      page = await recreateSession(
+        browser,
+        page,
+        config,
+        sessionLog,
+        activeProxy,
+        device,
+        sessionLocale
+      );
+    } catch (err) {
+      log('warn', `recreateSession falhou (${err.message}) — nova aba no mesmo Chromium`);
+      try {
+        page = await createSession(
+          browser,
+          config,
+          sessionLog,
+          activeProxy,
+          device,
+          sessionLocale
+        );
+      } catch (err2) {
+        log('warn', `Nova aba falhou (${err2.message}) — reciclando Chromium`);
+        await recycleBrowser(reason);
+      }
+    }
+  }
+
+  async function waitForTuxlerRecovery(reason) {
+    if (!config.tuxler?.enabled) return;
+    const waitMs = config.tuxler?.socksWaitMs ?? 20_000;
+    log('warn', `${reason} — aguardando SOCKS Tuxler`);
+    resetTuxlerSocksCache();
+    await waitForTuxlerSocks({
+      config,
+      logger: {
+        info: (...a) => log('info', ...a),
+        warn: (...a) => log('warn', ...a),
+      },
+      maxWaitMs: waitMs,
+    });
   }
 
   function visitContext() {
@@ -270,21 +404,50 @@ function createWorker({
       const q = result.quality || 'offer';
       if (q === 'intermediate') stats.intermediate += 1;
       else stats.offers += 1;
-      const visitClicks = result.meta?.clickCount ?? result.meta?.verifiedClicks ?? 0;
+      const visitClicks =
+        result.meta?.verifiedClicks ??
+        result.meta?.clickCount ??
+        0;
       stats.clicks += visitClicks;
+      const targets = result.meta?.clickTargets || {};
+      stats.adClicks += targets.ad || 0;
+      stats.siteClicks += targets.internal || 0;
+      stats.externalClicks += targets.external || 0;
       if (visitClicks > 0) {
-        log('info', `Cliques na visita: ${visitClicks} (total worker: ${stats.clicks})`);
+        log(
+          'info',
+          `Cliques VERIFICADOS na visita: ${visitClicks} ` +
+            `(anúncio=${targets.ad || 0} site=${targets.internal || 0} externo=${targets.external || 0}) | ` +
+            `total worker: ${stats.clicks} (anúncio ${stats.adClicks})`
+        );
+      } else if ((result.meta?.clickCount || 0) > 0) {
+        log(
+          'warn',
+          `Cliques disparados=${result.meta.clickCount} mas 0 verificados (CPM provavelmente não conta)`
+        );
       }
     } else {
-      stats.errors += 1;
+      // intermediate / dead-end: não infla OK (impressões do painel)
+      if (result && result.quality === 'intermediate') {
+        stats.intermediate += 1;
+        log('warn', 'Visita intermediate — não conta como OK/impressão');
+      } else {
+        stats.errors += 1;
+      }
     }
 
     stats.iterations += 1;
+    stats.lastProgressAt = Date.now();
 
-    if (recycleRequested) {
-      const reason = recycleRequested;
-      recycleRequested = null;
-      await recycleBrowser(reason);
+    // Smartlink blank no Webshare: troca IP agora (senão fica “parado” no mesmo proxy morto).
+    if (
+      needsBrowser &&
+      result?.meta?.emptyUi &&
+      config.proxy?.enabled &&
+      proxyLease
+    ) {
+      log('warn', 'Página vazia — trocando proxy sticky');
+      await recycleBrowser('empty-page');
       return;
     }
 
@@ -297,9 +460,10 @@ function createWorker({
         (config.concurrency || 1) > 1
     );
     if (tuxlerTurnQueue) {
+      visitsSinceBrowserStart += 1;
       await releaseTuxlerTurn();
     } else {
-      await maybeRestartBrowser();
+      await afterVisitHousekeeping();
     }
   }
 
@@ -313,86 +477,100 @@ function createWorker({
       try {
         await tick();
       } catch (err) {
-        if (stopping || isAbortError(err)) {
-          break;
-        }
-        stats.errors += 1;
-        log('error', 'Erro na iteração:', err.message);
-        log('debug', err.stack);
+        if (stopping) break;
 
-        if (err.code === 'VISIT_TIMEOUT' || err.code === 'NAV_GATE_TIMEOUT') {
+        // Abort do watchdog-ram NÃO encerra o worker (antes matava o loop).
+        if (isAbortError(err)) {
+          log('warn', 'Visita interrompida (recycle/watchdog) — reabrindo se preciso');
+          if (recycling) await recycling;
+          else if (needsBrowser && (!browser || !browser.isConnected())) {
+            try {
+              await ensureBrowser();
+            } catch (e) {
+              log('warn', 'Reabrir após abort falhou:', e.message);
+            }
+          }
+          if (needsBrowser && !stopping) await afterVisitHousekeeping();
+        } else if (err.code === 'VISIT_TIMEOUT' || err.code === 'NAV_GATE_TIMEOUT') {
+          stats.errors += 1;
           stats.iterations += 1;
+          stats.lastProgressAt = Date.now();
           log(
             'warn',
             err.code === 'NAV_GATE_TIMEOUT'
               ? 'SOCKS saturado (nav gate) — próximo link'
               : 'Iteração estourou VISIT_MAX_SEC — próximo link'
           );
-          try {
-            page = await recreateSession(
-              browser,
-              page,
-              config,
-              {
-                info: (...a) => log('info', ...a),
-                debug: (...a) => log('debug', ...a),
-              },
-              activeProxy,
-              device,
-              sessionLocale
-            );
-          } catch {
-            await releaseTuxlerTurn();
-          }
-          continue;
-        }
+          await recoverPage(err.code === 'NAV_GATE_TIMEOUT' ? 'nav-gate' : 'visita-timeout');
+          if (!stopping) await afterVisitHousekeeping();
+        } else if (
+          err instanceof TuxlerInactiveError ||
+          err.code === 'TUXLER_SOCKS_OFFLINE' ||
+          err.code === 'TUXLER_INACTIVE'
+        ) {
+          stats.errors += 1;
+          log('error', 'Erro na iteração:', err.message);
+          await waitForTuxlerRecovery(err.message);
+        } else {
+          stats.errors += 1;
+          log('error', 'Erro na iteração:', err.message);
+          log('debug', err.stack);
 
-        if (needsBrowser) {
-          const tuxlerSkip =
-            config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
-          const rotateProxy =
-            Boolean(proxyLease) && isTransientProxyError(err) && !tuxlerSkip;
-          try {
-            if (rotateProxy) {
-              log('warn', 'Erro de túnel/proxy — trocando sticky e reiniciando browser');
-              await releaseTuxlerTurn();
-              await ensureBrowser();
-            } else if (isTransientProxyError(err)) {
-              log('warn', 'Erro de rede/proxy — recriando sessão (Tuxler skip, sem rotação)');
-              page = await recreateSession(
-                browser,
-                page,
-                config,
-                {
-                  info: (...a) => log('info', ...a),
-                  debug: (...a) => log('debug', ...a),
-                },
-                activeProxy,
-                device,
-                sessionLocale
-              );
-            } else {
-              page = await recreateSession(
-                browser,
-                page,
-                config,
-                {
-                  info: (...a) => log('info', ...a),
-                  debug: (...a) => log('debug', ...a),
-                },
-                activeProxy,
-                device,
-                sessionLocale
-              );
+          if (needsBrowser) {
+            const tuxlerSkip =
+              config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
+            const rotateProxy =
+              Boolean(proxyLease) && isTransientProxyError(err) && !tuxlerSkip;
+            try {
+              // Watchdog / recycle já matou o Chromium no meio da visita.
+              if (!browser || !browser.isConnected()) {
+                await ensureBrowser();
+              } else if (rotateProxy) {
+                log('warn', 'Erro de túnel/proxy — trocando sticky e reiniciando browser');
+                await releaseTuxlerTurn();
+                await ensureBrowser();
+              } else if (isTransientProxyError(err)) {
+                log('warn', 'Erro de rede/proxy — recriando sessão (Tuxler skip, sem rotação)');
+                page = await recreateSession(
+                  browser,
+                  page,
+                  config,
+                  {
+                    info: (...a) => log('info', ...a),
+                    debug: (...a) => log('debug', ...a),
+                  },
+                  activeProxy,
+                  device,
+                  sessionLocale
+                );
+              } else {
+                page = await recreateSession(
+                  browser,
+                  page,
+                  config,
+                  {
+                    info: (...a) => log('info', ...a),
+                    debug: (...a) => log('debug', ...a),
+                  },
+                  activeProxy,
+                  device,
+                  sessionLocale
+                );
+              }
+            } catch {
+              if (tuxlerSkip) await recycleBrowser('sessão-morta');
+              else await releaseTuxlerTurn();
             }
-          } catch {
-            await releaseTuxlerTurn();
+            // Erros também contam p/ restart — antes o Chromium vivia forever no catch.
+            if (!stopping) await afterVisitHousekeeping();
           }
         }
       }
 
       if (stopping) break;
 
+      // Novo controller: abort do recycle não pode matar o sleep entre visitas.
+      abortController = new AbortController();
       const waitSec = randomInt(config.intervalMinSec, config.intervalMaxSec);
       log('info', `Aguardando ${waitSec}s...`);
       try {
@@ -400,7 +578,12 @@ function createWorker({
           shouldStop: () => stopping,
           signal: abortController?.signal,
         });
-      } catch {
+      } catch (err) {
+        if (stopping || (isAbortError(err) && stopping)) break;
+        if (isAbortError(err)) {
+          abortController = new AbortController();
+          continue;
+        }
         break;
       }
     }
@@ -410,12 +593,24 @@ function createWorker({
     stopping = true;
     abortController?.abort();
     log('info', 'Encerrando...', JSON.stringify(getStats()));
+    // Solta navegação pendente antes do close — evita "workers ainda ativos" no shutdown.
+    if (page && !page.isClosed()) {
+      try {
+        await page.stopLoading();
+      } catch {
+        // ignore
+      }
+    }
     if (needsBrowser) {
-      await closeBrowser(browser, {
-        info: (...a) => log('info', ...a),
-        warn: (...a) => log('warn', ...a),
-        debug: (...a) => log('debug', ...a),
-      });
+      await closeBrowser(
+        browser,
+        {
+          info: (...a) => log('info', ...a),
+          warn: (...a) => log('warn', ...a),
+          debug: (...a) => log('debug', ...a),
+        },
+        { forceMs: 2_500 }
+      );
     }
     browser = null;
     page = null;
@@ -479,16 +674,55 @@ function createWorker({
   }
 
   function getStats() {
+    let currentUrl = null;
+    try {
+      if (page && !page.isClosed()) currentUrl = page.url();
+    } catch {
+      currentUrl = null;
+    }
     return {
       ...stats,
       uptimeSec: Math.round((Date.now() - stats.startedAt) / 1000),
-      currentUrl: page && !page.isClosed() ? page.url() : null,
+      currentUrl,
       previewCapturedAt: lastPreview?.capturedAt || null,
       pageTitle: lastPreview?.title || '',
     };
   }
 
-  return { workerId, run, stop, getStats, capturePreview, forceRecycleBrowser };
+  /**
+   * Destrava worker parado (nenhuma iteração há `maxMs`): aborta a visita, mata
+   * o Chromium no PID e solta o mutex de recycle. Sem isso, um await pendurado
+   * congela o worker até o operador reiniciar tudo.
+   */
+  async function kickIfStalled(maxMs) {
+    if (!needsBrowser || stopping) return false;
+    const idleMs = Date.now() - (stats.lastProgressAt || stats.startedAt);
+    if (idleMs < maxMs) return false;
+
+    log('warn', `Travado há ${Math.round(idleMs / 1000)}s sem iteração — forçando reinício`);
+    try {
+      abortController?.abort();
+    } catch {
+      // ignore
+    }
+    const pid = browser?.process?.()?.pid;
+    if (pid) killProcessTree(pid, { warn: (...a) => log('warn', ...a) });
+    browser = null;
+    page = null;
+    recycling = null;
+    stats.lastProgressAt = Date.now();
+    return true;
+  }
+
+  return {
+    workerId,
+    run,
+    stop,
+    getStats,
+    capturePreview,
+    forceRecycleBrowser,
+    kickIfStalled,
+  };
 }
 
 module.exports = { createWorker };

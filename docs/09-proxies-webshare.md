@@ -86,18 +86,44 @@ PROXY_FALLBACK_DIRECT=true
 Cada acesso paralelo com IP **diferente ao mesmo tempo** precisa de **1 egress distinto**
 (1 proxy HTTP sticky ou 1 máquina Tuxler).
 
+### Webshare (lista download)
+
+No painel Webshare: Proxy → list download → URL no formato
+`https://proxy.webshare.io/api/v2/proxy/list/download/<token>/...`.
+Linhas: `host:port:user:pass`.
+
 ```env
-CONCURRENCY=20
+CONCURRENCY=12
 PROXY_ENABLED=true
-PROXY_MAX=20
-DEVICE_MIX=desktop:10,mobile:10
+PROXY_MAX=12
+PROXY_LIST_URL=https://proxy.webshare.io/api/v2/proxy/list/download/SEU_TOKEN/...
+PROXY_SKIP_FLAGGED=false
+TUXLER_ENABLED=false
+DEVICE_MIX=desktop:6,mobile:6
 ```
+
+No boot o bot baixa a lista e monta até `PROXY_MAX` slots (1 endpoint/worker).
+Datacenter costuma ser marcado como proxy/anon — residencial rende melhor em CPM.
+
+### Gateway sticky (DataImpulse etc.)
+
+```env
+CONCURRENCY=12
+PROXY_ENABLED=true
+PROXY_MAX=12
+PROXY_SERVER=http://LOGIN:SENHA@gw.dataimpulse.com:823
+TUXLER_ENABLED=false
+DEVICE_MIX=desktop:6,mobile:6
+```
+
+Com `PROXY_ENABLED=true`, o bot **desliga o Tuxler na sessão**. Com gateway sticky cria
+`PROXY_MAX` sessões (`login__cr.cc;sessid.N`). Cada worker recebe um lease exclusivo.
 
 | Cenário | Workers |
 |---------|---------|
 | `dryRun` | `CONCURRENCY` (sem browser) |
 | `directLink` + proxy HTTP | `min(CONCURRENCY, pool)` — 1 proxy exclusivo por worker |
-| `directLink` + **Tuxler** | N workers lógicos; **1 browser + 1 IP por vez** (rotação serial) |
+| `directLink` + **Tuxler** | N Chromiums; **1 SOCKS** — gotos limitados (~4) para não quebrar TLS |
 | `directLink` sem proxy/Tuxler | Forçado a **1** (mesmo IP sem ganho) |
 
 Restart periódico (`BROWSER_RESTART_EVERY`): libera lease e adquire IP novo (proxy ou Tuxler).

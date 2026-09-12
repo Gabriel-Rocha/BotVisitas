@@ -72,8 +72,9 @@ function loadConfig() {
 
     intervalMinSec: int(process.env.INTERVAL_MIN_SEC, 5),
     intervalMaxSec: int(process.env.INTERVAL_MAX_SEC, 12),
-    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 25),
+    browserRestartEvery: int(process.env.BROWSER_RESTART_EVERY, 10),
     chromeProcessLimit: int(process.env.CHROME_PROCESS_LIMIT, 1),
+    workerStallSec: int(process.env.WORKER_STALL_SEC, 300),
     memoryWarnPct: float(process.env.MEMORY_WARN_PCT, 0.82),
     memoryCriticalPct: float(process.env.MEMORY_CRITICAL_PCT, 0.9),
     concurrency: int(process.env.CONCURRENCY, 5),
@@ -92,22 +93,22 @@ function loadConfig() {
     maxClicksPerPage: int(process.env.MAX_CLICKS_PER_PAGE, 3),
     browsePagesMin: int(process.env.BROWSE_PAGES_MIN, 0),
     browsePagesMax: int(process.env.BROWSE_PAGES_MAX, 0),
-    includeReferrer: bool(process.env.INCLUDE_REFERRER, true),
+    includeReferrer: bool(process.env.INCLUDE_REFERRER, false),
     clickSelector: (process.env.CLICK_SELECTOR || '').trim() || null,
     engageEnabled: bool(process.env.ENGAGE_ENABLED, true),
     engageClicksMin: int(process.env.ENGAGE_CLICKS_MIN, 1),
-    engageClicksMax: int(process.env.ENGAGE_CLICKS_MAX, 3),
-    engageMaxMs: int(process.env.ENGAGE_MAX_MS, 25_000),
-    engageRequireUrlChange: bool(process.env.ENGAGE_REQUIRE_URL_CHANGE, false),
-    clickMode: (process.env.CLICK_MODE || 'legacy').trim().toLowerCase(),
+    engageClicksMax: int(process.env.ENGAGE_CLICKS_MAX, 1),
+    engageMaxMs: int(process.env.ENGAGE_MAX_MS, 10_000),
+    engageRequireUrlChange: bool(process.env.ENGAGE_REQUIRE_URL_CHANGE, true),
+    clickMode: (process.env.CLICK_MODE || 'engage').trim().toLowerCase(),
 
-    visitMaxSec: int(process.env.VISIT_MAX_SEC, 60),
+    visitMaxSec: int(process.env.VISIT_MAX_SEC, 35),
 
     // Tempo lendo a página antes/depois do clique (modo rápido = menos segundos)
-    dwellMinSec: int(process.env.BROWSE_DWELL_MIN_SEC, 5),
-    dwellMaxSec: int(process.env.BROWSE_DWELL_MAX_SEC, 9),
-    dwellTailMinSec: int(process.env.BROWSE_DWELL_TAIL_MIN_SEC, 3),
-    dwellTailMaxSec: int(process.env.BROWSE_DWELL_TAIL_MAX_SEC, 6),
+    dwellMinSec: int(process.env.BROWSE_DWELL_MIN_SEC, 2),
+    dwellMaxSec: int(process.env.BROWSE_DWELL_MAX_SEC, 3),
+    dwellTailMinSec: int(process.env.BROWSE_DWELL_TAIL_MIN_SEC, 1),
+    dwellTailMaxSec: int(process.env.BROWSE_DWELL_TAIL_MAX_SEC, 2),
 
     bandwidthSaver: (() => {
       const raw = (process.env.BANDWIDTH_SAVER || 'light').trim().toLowerCase();
@@ -115,6 +116,17 @@ function loadConfig() {
       if (['aggressive', 'max', 'high'].includes(raw)) return 'aggressive';
       return 'light';
     })(),
+
+    // Gateway HTTP/SOCKS: 1 endpoint exclusivo por worker (Webshare / DataImpulse).
+    proxy: {
+      enabled: bool(process.env.PROXY_ENABLED, false),
+      server: (process.env.PROXY_SERVER || '').trim() || null,
+      list: (process.env.PROXY_LIST || '').trim() || null,
+      listUrl: (process.env.PROXY_LIST_URL || '').trim() || null,
+      max: int(process.env.PROXY_MAX, int(process.env.CONCURRENCY, 12)),
+      skipFlagged: bool(process.env.PROXY_SKIP_FLAGGED, true),
+      countries: (process.env.PROXY_COUNTRIES || '').trim() || null,
+    },
 
     tuxler: {
       enabled: bool(process.env.TUXLER_ENABLED, process.platform === 'win32'),
@@ -126,7 +138,8 @@ function loadConfig() {
       socksHost: (process.env.TUXLER_SOCKS_HOST || '').trim() || null,
       socksPort: int(process.env.TUXLER_SOCKS_PORT, 0) || null,
       requireActive: bool(process.env.TUXLER_REQUIRE_ACTIVE, true),
-      navSlots: int(process.env.TUXLER_NAV_SLOTS, 3),
+      // 0 = sem teto artificial: paralelismo = número de workers
+      navSlots: int(process.env.TUXLER_NAV_SLOTS, 0),
       clickRelX: float(process.env.TUXLER_CLICK_X, 0.5),
       clickRelY: float(process.env.TUXLER_CLICK_Y, 0.68),
       activateRelX: float(process.env.TUXLER_ACTIVATE_X, 0.5),
@@ -162,6 +175,11 @@ function loadConfig() {
     config.workerCountries = slots
       .map((slot, i) => slot.country || geos[i % geos.length])
       .join(',');
+  }
+
+  // 12 workers reais em paralelo → proxy HTTP sticky. Tuxler = 1 SOCKS/PC.
+  if (config.proxy?.enabled && config.tuxler?.enabled) {
+    config.tuxler.enabled = false;
   }
 
   if (config.intervalMinSec > config.intervalMaxSec) {

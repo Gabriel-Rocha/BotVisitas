@@ -49,6 +49,7 @@ function createMemoryWatch({
   let timer = null;
   let lastLevel = 'ok';
   let lastCriticalAt = 0;
+  let warnStreak = 0;
   let lastSnapshot = readMemorySnapshot();
 
   function tick() {
@@ -56,24 +57,41 @@ function createMemoryWatch({
     const level = classifyPressure(lastSnapshot, { warnPct, criticalPct });
     const { usedPct, usedMb, freeMb, totalMb } = lastSnapshot;
     const pctLabel = `${Math.round(usedPct * 100)}%`;
+    const now = Date.now();
+
+    const fireRecycle = (label) => {
+      if (now - lastCriticalAt < 25_000) return;
+      lastCriticalAt = now;
+      logger?.warn?.(label);
+      Promise.resolve(onCritical?.(lastSnapshot)).catch((err) => {
+        logger?.warn?.('Watchdog RAM falhou:', err.message);
+      });
+    };
 
     if (level === 'critical') {
-      const now = Date.now();
-      if (now - lastCriticalAt > 30_000) {
-        lastCriticalAt = now;
-        logger?.warn?.(
-          `RAM crítica ${pctLabel} (${usedMb}/${totalMb} MB, livre ${freeMb} MB) — reciclagem de browsers`
-        );
-        Promise.resolve(onCritical?.(lastSnapshot)).catch((err) => {
-          logger?.warn?.('Watchdog RAM falhou:', err.message);
-        });
-      }
-    } else if (level === 'warn' && lastLevel !== 'warn') {
-      logger?.warn?.(
-        `RAM alta ${pctLabel} (${usedMb}/${totalMb} MB, livre ${freeMb} MB) — próximo restart periódico`
+      warnStreak = 0;
+      fireRecycle(
+        `RAM crítica ${pctLabel} (${usedMb}/${totalMb} MB, livre ${freeMb} MB) — reciclagem imediata de browsers`
       );
+    } else if (level === 'warn') {
+      warnStreak += 1;
+      if (lastLevel !== 'warn') {
+        logger?.warn?.(
+          `RAM alta ${pctLabel} (${usedMb}/${totalMb} MB, livre ${freeMb} MB) — monitorando`
+        );
+      }
+      // 2 ticks (~40s) em warn: recicla antes de chegar em critical (leak lento).
+      if (warnStreak >= 2) {
+        fireRecycle(
+          `RAM alta sustentada ${pctLabel} (${usedMb}/${totalMb} MB) — reciclagem preventiva`
+        );
+        warnStreak = 0;
+      }
     } else if (level === 'ok' && lastLevel !== 'ok') {
+      warnStreak = 0;
       logger?.info?.(`RAM normalizou ${pctLabel} (livre ${freeMb} MB)`);
+    } else {
+      warnStreak = 0;
     }
 
     lastLevel = level;

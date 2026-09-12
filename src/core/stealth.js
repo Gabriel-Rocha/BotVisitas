@@ -15,6 +15,19 @@ const { getTuxlerNavGate } = require('./navGate');
  * 4. Comportamento humano (scroll suave, mouse, dwell)
  */
 
+/**
+ * `url()` lança "Requesting main frame too early" / "Target closed" quando o
+ * Chromium morre no meio da visita (watchdog, recycle, proxy caindo).
+ */
+function pageUrl(p) {
+  try {
+    if (!p || (typeof p.isClosed === 'function' && p.isClosed())) return '';
+    return p.url() || '';
+  } catch {
+    return '';
+  }
+}
+
 /** Args extras do Chromium que reduzem fingerprint de bot (sem quebrar JS do site). */
 function getStealthLaunchArgs({ lang = 'pt-BR' } = {}) {
   const language = String(lang || 'pt-BR').trim() || 'pt-BR';
@@ -427,24 +440,31 @@ async function humanBrowsePause(page, dwellSec, { signal, shouldStop } = {}) {
 /**
  * Segue redirects de JS / meta refresh (ex.: AliExpress s.click mostrando <script> cru).
  */
-async function followClientRedirects(page, logger, { maxHops = 6, config, shouldStop, signal } = {}) {
+async function followClientRedirects(page, logger, { maxHops = 4, config, shouldStop, signal } = {}) {
   const hops = [];
   const gate =
-    config?.tuxler?.enabled !== false
-      ? getTuxlerNavGate(config?.tuxler?.navSlots ?? 3)
+    config?.tuxler?.enabled === true
+      ? getTuxlerNavGate(config?.tuxler?.navSlots || 1)
       : null;
-  const hopTimeout = Math.min(12_000, config?.navigationTimeoutMs || 30_000);
+  const hopTimeout = Math.min(8_000, config?.navigationTimeoutMs || 30_000);
+
+  const hostOfUrl = (raw) => {
+    try {
+      return new URL(raw).hostname;
+    } catch {
+      return '';
+    }
+  };
 
   for (let i = 0; i < maxHops; i += 1) {
     if (shouldStop?.() || signal?.aborted) break;
-    const before = page.url();
+    const before = pageUrl(page);
 
-    // Espera redirect espontâneo (window.location / meta).
     try {
       const navWait = page
-        .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4_500 })
+        .waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 2_500 })
         .catch(() => null);
-      await Promise.race([navWait, sleep(2_200, { signal })]);
+      await Promise.race([navWait, sleep(900, { signal })]);
     } catch {
       // timeout / abort ok
     }
@@ -497,20 +517,31 @@ async function followClientRedirects(page, logger, { maxHops = 6, config, should
         if (gate) await gate.run(go, { signal, acquireTimeoutMs: 15_000 });
         else await go();
         hops.push(forced);
-        continue;
       } catch (err) {
         if (logger) logger.warn(`Falha no redirect cliente: ${err.message}`);
         break;
       }
+    } else {
+      const after = pageUrl(page);
+      if (after.split('#')[0] !== before.split('#')[0]) {
+        hops.push(after);
+      } else {
+        break;
+      }
     }
 
-    const after = page.url();
-    if (after.split('#')[0] !== before.split('#')[0]) {
-      hops.push(after);
-      continue;
+    // eatcells ↔ ogar.eatcells etc. — não loop infinito.
+    if (hops.length >= 3) {
+      const h1 = hostOfUrl(hops[hops.length - 1]);
+      const h2 = hostOfUrl(hops[hops.length - 2]);
+      const h3 = hostOfUrl(hops[hops.length - 3]);
+      if (h1 && h1 === h3 && h1 !== h2) {
+        logger?.info?.('Redirect ping-pong — parando hops');
+        break;
+      }
     }
-    break;
   }
+
   return hops;
 }
 
@@ -524,7 +555,7 @@ async function clickAtBox(page, box) {
     page.__botDeviceType === 'tablet';
 
   if (useTouch && page.touchscreen) {
-    await sleep(randomInt(180, 420));
+    await sleep(randomInt(80, 220));
     try {
       await page.touchscreen.tap(x, y);
       return true;
@@ -534,12 +565,11 @@ async function clickAtBox(page, box) {
   }
 
   await humanMouseMove(page, x, y);
-  await sleep(randomInt(280, 800)); // hover antes do clique (IVT marca clique instantâneo)
+  await sleep(randomInt(120, 380));
   try {
-    // Sequência real de ponteiro (não element.click() sintético).
     await page.mouse.move(x, y);
     await page.mouse.down({ button: 'left' });
-    await sleep(randomInt(45, 130));
+    await sleep(randomInt(40, 110));
     await page.mouse.up({ button: 'left' });
     return true;
   } catch {
@@ -760,13 +790,13 @@ async function clickIframeAds(page, logger) {
       const box = await el.boundingBox();
       if (!box || box.width < 40 || box.height < 40) continue;
       if (box.y > (page.__botViewport?.height || 900) + 20) continue;
-      const beforeUrl = page.url();
+      const beforeUrl = pageUrl(page);
       const probeBefore = await readClickProbe(page);
       const ok = await clickAtBox(page, box);
       if (!ok) continue;
       await sleep(randomInt(800, 2000));
       const probeAfter = await readClickProbe(page);
-      const urlChanged = page.url().split('#')[0] !== beforeUrl.split('#')[0];
+      const urlChanged = pageUrl(page).split('#')[0] !== beforeUrl.split('#')[0];
       const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
       const verified = urlChanged || trustedDelta > 0;
       results.push({
@@ -805,6 +835,9 @@ async function humanEngage(
     fast = false,
     maxMs = 10_000,
     requireUrlChange = false,
+    allowCenterFallback = false,
+    preferAnchors = false,
+    preferOfferLinks = true,
     signal = null,
     shouldStop = null,
   } = {}
@@ -815,69 +848,61 @@ async function humanEngage(
     'a[href], button, [role="button"], input[type="submit"], input[type="button"], [onclick], .btn, .button, [data-cta], [data-click], [data-ad], ins.adsbygoogle, .adsbygoogle';
   const deadline = maxMs > 0 ? Date.now() + maxMs : Infinity;
   const waitOpts = { signal, shouldStop };
+  let attempts = 0;
   const expired = () => {
     if (Boolean(shouldStop?.()) || Boolean(signal?.aborted)) return true;
     if (maxMs <= 0 || Date.now() < deadline) return false;
-    // Estourou tempo — ainda permite tentar clique se nenhum foi feito
     return record.length > 0 || attempts >= 3;
   };
 
   await installClickProbe(page);
 
-  await sleepInterruptible(randomInt(fast ? 300 : 2000, fast ? 800 : 3500), waitOpts);
+  // Perfil rápido: menos “teatro” antes do CTR (volume > roleplay).
+  await sleepInterruptible(randomInt(fast ? 120 : 800, fast ? 350 : 1_800), waitOpts);
   if (expired()) {
     return { clicks: record, clickCount: record.length, verifiedCount: 0 };
   }
-  if (!fast) {
-    try {
-      await page.waitForSelector('a[href], button, iframe, [role="button"]', {
-        timeout: 10_000,
-      });
-    } catch {
-      // página sem interativos óbvios
-    }
-  } else {
-    try {
-      await page.waitForSelector('a[href], button, iframe, [role="button"]', {
-        timeout: 3_000,
-      });
-    } catch {
-      // fast: segue para clique
-    }
+  try {
+    await page.waitForSelector('a[href], button, iframe, [role="button"]', {
+      timeout: fast ? 2_500 : 8_000,
+    });
+  } catch {
+    // página sem interativos óbvios
   }
   if (expired()) {
     return { clicks: record, clickCount: record.length, verifiedCount: 0 };
   }
   if (!fast) {
     try {
-      await page.waitForNetworkIdle({ idleTime: 400, timeout: 4_000 });
+      await page.waitForNetworkIdle({ idleTime: 350, timeout: 2_500 });
     } catch {
       // polling eterno
     }
   }
 
-  for (let i = 0; i < randomInt(1, 2); i += 1) {
-    if (expired()) break;
-    await humanMouseMove(
-      page,
-      randomInt(30, Math.max(60, vp.width - 30)),
-      randomInt(40, Math.max(80, vp.height - 40))
-    );
-    await sleepInterruptible(randomInt(80, 250), waitOpts);
+  if (!fast) {
+    for (let i = 0; i < randomInt(1, 2); i += 1) {
+      if (expired()) break;
+      await humanMouseMove(
+        page,
+        randomInt(30, Math.max(60, vp.width - 30)),
+        randomInt(40, Math.max(80, vp.height - 40))
+      );
+      await sleepInterruptible(randomInt(60, 180), waitOpts);
+    }
   }
   if (expired()) {
     return { clicks: record, clickCount: record.length, verifiedCount: 0 };
   }
   await humanScroll(page);
-  await sleepInterruptible(randomInt(200, 500), waitOpts);
+  await sleepInterruptible(randomInt(fast ? 80 : 150, fast ? 220 : 400), waitOpts);
 
   const want = Math.max(1, Math.min(maxClicks, randomInt(1, Math.max(1, maxClicks))));
-  let attempts = 0;
-  const maxAttempts = Math.max(want * 5, 8);
+  const maxAttempts = Math.max(want * (fast ? 3 : 5), fast ? 5 : 8);
 
   async function attemptClickOnHandle(handle, meta) {
     if (expired()) return null;
-    const beforeUrl = page.url();
+    const beforeUrl = pageUrl(page);
     await installClickProbe(page);
     const probeBefore = await readClickProbe(page);
     try {
@@ -887,7 +912,7 @@ async function humanEngage(
     } catch {
       // ignore
     }
-    await sleepInterruptible(randomInt(500, 1400), waitOpts);
+    await sleepInterruptible(randomInt(fast ? 120 : 400, fast ? 350 : 900), waitOpts);
     if (expired()) return null;
     const box = await handle.boundingBox();
     let fired = await clickAtBox(page, box);
@@ -917,9 +942,9 @@ async function humanEngage(
     await followClientRedirects(page, logger, { maxHops: 4 });
 
     const probeAfter = await readClickProbe(page);
-    const urlChanged = page.url().split('#')[0] !== beforeUrl.split('#')[0];
+    const urlChanged = pageUrl(page).split('#')[0] !== beforeUrl.split('#')[0];
     const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
-    const finalUrl = page.url();
+    const finalUrl = pageUrl(page);
     const hrefBlob = `${meta.href || ''} ${finalUrl}`;
     const trackerish = /click_id|clickid|\/click|cpc=|utm_|ad_id|campaign|aff_|haff_|\bkey=|smartlink|effectivecpm|rtb/i.test(
       hrefBlob
@@ -930,12 +955,12 @@ async function humanEngage(
     const ctaish = /click|continue|watch|play|start|claim|download|join|go|next|offer|install|win/i.test(
       `${meta.text || ''} ${meta.selector || ''}`
     );
-    // v1+: trusted só conta com URL de tracking; ctaish sozinho gera falso positivo (DuckDuckGo etc.)
-    const verified = !junkDest && (
-      requireUrlChange
+    // v1+: URL change = CTR forte; trusted/tracker também contam se ENGAGE_REQUIRE_URL_CHANGE=false
+    const verified =
+      !junkDest &&
+      (requireUrlChange
         ? urlChanged
-        : urlChanged || (trustedDelta > 0 && trackerish) || (urlChanged && ctaish)
-    );
+        : urlChanged || (trustedDelta > 0 && (trackerish || ctaish)) || (urlChanged && ctaish));
 
     return {
       ...meta,
@@ -1024,9 +1049,48 @@ async function humanEngage(
     } catch {
       break;
     }
+    if (preferOfferLinks) {
+      const offers = candidates.filter((c) => {
+        const href = String(c.href || '');
+        const text = String(c.text || '');
+        const tag = String(c.tag || '').toUpperCase();
+        const tracker =
+          /click_id|clickid|\/click|cpc=|utm_|ad_id|campaign|aff_|haff_|smartlink|effectivecpm|rtb|offer/i.test(
+            `${href} ${text}`
+          );
+        const cta =
+          /continue|watch|play|start|claim|download|join|go|next|install|win|click here|get started/i.test(
+            text
+          );
+        const external =
+          tag === 'A' &&
+          href &&
+          !href.startsWith('#') &&
+          (() => {
+            try {
+              return new URL(href, 'https://x.invalid').hostname !== 'x.invalid';
+            } catch {
+              return false;
+            }
+          })();
+        return tracker || cta || (tag === 'BUTTON' && cta) || (external && Number(c.score) >= 8);
+      });
+      if (offers.length) candidates = offers;
+    } else if (preferAnchors) {
+      const anchors = candidates.filter(
+        (c) =>
+          String(c.tag || '').toUpperCase() === 'A' &&
+          c.href &&
+          c.href !== '#' &&
+          !String(c.href).startsWith('#')
+      );
+      if (anchors.length) {
+        candidates = Math.random() < 0.7 ? anchors : candidates;
+      }
+    }
     if (!candidates.length) {
       if (attempts >= 2) break;
-      await sleepInterruptible(1200, waitOpts);
+      await sleepInterruptible(fast ? 400 : 1200, waitOpts);
       continue;
     }
 
@@ -1068,9 +1132,9 @@ async function humanEngage(
     await sleepInterruptible(randomInt(250, 700), waitOpts);
   }
 
-  // 5) Último recurso: toque no centro da viewport (muitos interstitials são full-bleed)
-  if (!record.length && !expired()) {
-    const beforeUrl = page.url();
+  // 5) Último recurso: centro da viewport — só se explicitamente permitido (hybrid).
+  if (!record.length && allowCenterFallback && !expired()) {
+    const beforeUrl = pageUrl(page);
     await installClickProbe(page);
     const probeBefore = await readClickProbe(page);
     const cx = Math.floor(vp.width * 0.5);
@@ -1087,7 +1151,7 @@ async function humanEngage(
       }
       await followClientRedirects(page, logger, { maxHops: 4 });
       const probeAfter = await readClickProbe(page);
-      const urlChanged = page.url().split('#')[0] !== beforeUrl.split('#')[0];
+      const urlChanged = pageUrl(page).split('#')[0] !== beforeUrl.split('#')[0];
       const trustedDelta = (probeAfter.trusted || 0) - (probeBefore.trusted || 0);
       const centerVerified = requireUrlChange ? urlChanged : urlChanged || trustedDelta > 0;
       if (centerVerified) {
@@ -1115,8 +1179,8 @@ async function humanEngage(
 
   if (!record.length && logger) {
     logger.warn(
-      'Nenhum click VERIFICADO nesta página — CTR do site pode não registrar. ' +
-        'Tente CLICK_SELECTOR no CTA ou espere ads carregarem (proxy/geo).'
+      'Nenhum link/CTA VERIFICADO nesta página — CTR pode não registrar. ' +
+        'Defina CLICK_SELECTOR no CTA ou aumente ENGAGE_MAX_MS / BROWSE_PAGES.'
     );
   }
 
@@ -1137,7 +1201,7 @@ async function humanEngage(
 
 /**
  * Cliques no centro — fluxo original v1 (page.mouse.click após goto).
- * Cada worker executa os seus próprios cliques; contabiliza o que foi disparado.
+ * Clique no centro. Só marca verified se a URL mudou (CTR real para CPM).
  */
 async function legacyCenterClicks(page, config, logger, { count, followRedirects = true } = {}) {
   const vp = page.__botViewport || {
@@ -1150,52 +1214,82 @@ async function legacyCenterClicks(page, config, logger, { count, followRedirects
   const min = Math.max(1, config?.engageClicksMin ?? 1);
   const max = Math.max(min, config?.engageClicksMax ?? cap);
   const n = Math.max(1, count ?? randomInt(min, Math.min(cap, max)));
+  const requireUrlChange = config?.engageRequireUrlChange !== false;
 
   logger?.info?.(`Cliques no centro (${Math.round(x)},${Math.round(y)}): ${n} [v1]`);
 
   const clicks = [];
+  let urlChangedOnce = false;
+  const startUrl = pageUrl(page);
+
   for (let i = 0; i < n; i += 1) {
+    const beforeUrl = pageUrl(page);
     try {
       await page.mouse.click(x, y);
-      clicks.push({
-        via: 'legacy-center',
-        verified: true,
-        performed: true,
-        index: i + 1,
-        x: Math.round(x),
-        y: Math.round(y),
-      });
     } catch (err) {
       logger?.warn?.(`Clique ${i + 1}/${n} falhou: ${err.message}`);
+      continue;
     }
-    if (i < n - 1) {
-      await sleep(randomInt(80, 280));
-    }
-  }
 
-  if (followRedirects && clicks.length) {
     try {
       await Promise.race([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8_000 }),
-        sleep(1_500),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5_000 }),
+        sleep(randomInt(400, 900)),
       ]);
     } catch {
       // soft
     }
-    await followClientRedirects(page, logger, { maxHops: 4 });
+
+    const afterUrl = pageUrl(page);
+    const urlChanged = afterUrl.split('#')[0] !== beforeUrl.split('#')[0];
+    if (urlChanged) urlChangedOnce = true;
+
+    const trackerish =
+      /click_id|clickid|\/click|cpc=|utm_|ad_id|campaign|aff_|haff_|\bkey=|smartlink|effectivecpm|rtb/i.test(
+        afterUrl
+      );
+    const verified = requireUrlChange ? urlChanged : urlChanged || trackerish;
+
+    clicks.push({
+      via: 'legacy-center',
+      verified,
+      performed: true,
+      urlChanged,
+      index: i + 1,
+      x: Math.round(x),
+      y: Math.round(y),
+      finalUrl: afterUrl,
+    });
+
+    if (urlChanged) break;
+    if (i < n - 1) await sleep(randomInt(120, 320));
   }
 
-  const finalUrl = page.url();
+  if (followRedirects && urlChangedOnce) {
+    await followClientRedirects(page, logger, { maxHops: 4, config });
+  }
+
+  const finalUrl = pageUrl(page);
   for (const hit of clicks) {
     hit.finalUrl = finalUrl;
   }
 
-  logger?.info?.(`Cliques v1: ${clicks.length}/${n} disparados | final=${finalUrl}`);
+  const verifiedCount = clicks.filter((c) => c.verified).length;
+  logger?.info?.(
+    `Cliques v1: ${verifiedCount}/${clicks.length} verificados (disparados ${clicks.length}/${n}) | ` +
+      `urlChanged=${urlChangedOnce} | final=${finalUrl}`
+  );
+  if (!verifiedCount) {
+    logger?.warn?.(
+      'Cliques no centro SEM mudança de URL — CPM provavelmente não contabiliza. Tentando CTA/engage…'
+    );
+  }
 
   return {
     clicks,
     clickCount: clicks.length,
-    verifiedCount: clicks.length,
+    verifiedCount,
+    urlChanged: urlChangedOnce || finalUrl.split('#')[0] !== startUrl.split('#')[0],
   };
 }
 
@@ -1303,7 +1397,7 @@ async function openAsOrganicVisit(page, url, logger, { referrerUrl, warmup = fal
       } catch {
         // SPA / já navegou
       }
-      const landed = page.url() || '';
+      const landed = pageUrl(page) || '';
       let stillOnSource = true;
       try {
         const host = new URL(landed).hostname;
@@ -1331,35 +1425,58 @@ async function openAsOrganicVisit(page, url, logger, { referrerUrl, warmup = fal
 }
 
 /**
- * Prefere clique em `<a href>` interno a `page.goto` (histórico/referrer mais natural).
+ * Prefere clique real em `<a href>` (mouse) a `page.goto`.
  * Fallback: goto.
  */
 async function navigateLikeHuman(page, url, logger) {
   let clicked = false;
   try {
-    clicked = await page.evaluate((target) => {
+    const handle = await page.evaluateHandle((target) => {
+      const want = new URL(target).href.split('#')[0];
       const links = [...document.querySelectorAll('a[href]')];
       for (const a of links) {
         try {
           const abs = new URL(a.getAttribute('href'), location.href).href.split('#')[0];
-          const want = new URL(target).href.split('#')[0];
-          if (abs === want) {
-            a.scrollIntoView({ block: 'center', inline: 'nearest' });
-            a.click();
-            return true;
-          }
+          if (abs === want) return a;
         } catch {
           // continue
         }
       }
-      return false;
+      return null;
     }, url);
+    const el = handle.asElement();
+    if (el) {
+      try {
+        await el.evaluate((a) => a.scrollIntoView({ block: 'center', inline: 'nearest' }));
+        await sleep(randomInt(200, 500));
+        const box = await el.boundingBox();
+        if (box) {
+          clicked = await clickAtBox(page, box);
+        }
+        if (!clicked) {
+          await el.evaluate((a) => a.click());
+          clicked = true;
+        }
+      } finally {
+        try {
+          await handle.dispose();
+        } catch {
+          // ignore
+        }
+      }
+    } else {
+      try {
+        await handle.dispose();
+      } catch {
+        // ignore
+      }
+    }
   } catch {
     clicked = false;
   }
 
   if (clicked) {
-    if (logger) logger.debug(`Navegação por clique: ${url}`);
+    if (logger) logger.info(`Navegação por clique no link: ${url}`);
     try {
       await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45_000 });
     } catch {
@@ -1374,6 +1491,7 @@ async function navigateLikeHuman(page, url, logger) {
 }
 
 module.exports = {
+  pageUrl,
   getStealthLaunchArgs,
   chromeMajorFromUa,
   buildRealisticHeaders,

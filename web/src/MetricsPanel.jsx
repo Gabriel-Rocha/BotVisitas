@@ -106,6 +106,13 @@ export default function MetricsPanel({ status }) {
           </button>
         </div>
         {error ? <div className="error-banner">{error}</div> : null}
+        {(stats.clicks || 0) > 0 && (stats.adClicks || 0) === 0 ? (
+          <p className="muted">
+            Os {stats.clicks} cliques verificados foram navegação no próprio site
+            ({stats.siteClicks || 0}) ou destino externo ({stats.externalClicks || 0}).
+            Nenhum caiu em unidade de anúncio — não há CTR de ad nesta sessão.
+          </p>
+        ) : null}
       </section>
 
       <div className="grid metrics-grid">
@@ -174,6 +181,18 @@ export default function MetricsPanel({ status }) {
           ) : (
             <div className="value value-sm">—</div>
           )}
+        </div>
+        <div className="metric">
+          <div className="label">Cliques verificados</div>
+          <div className="value">{stats.clicks ?? 0}</div>
+        </div>
+        <div className="metric">
+          <div className="label">Em anúncio</div>
+          <div className="value">{stats.adClicks ?? 0}</div>
+        </div>
+        <div className="metric">
+          <div className="label">No próprio site</div>
+          <div className="value">{stats.siteClicks ?? 0}</div>
         </div>
         <div className="metric">
           <div className="label">Reciclagens</div>

@@ -89,6 +89,13 @@ async function createSession(
     locale: localeHints.locale,
   });
 
+  if (activeProxy?.username && activeProxy?.password) {
+    await page.authenticate({
+      username: activeProxy.username,
+      password: activeProxy.password,
+    });
+  }
+
   const bwMode = config.bandwidthSaver || 'light';
   await applyBandwidthSaver(page, { mode: bwMode, logger });
 

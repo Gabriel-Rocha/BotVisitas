@@ -73,9 +73,17 @@ async function safeFetchEgress(config, logger, preferredCountry) {
         socksPort: socks.port,
         socksOpen: socks.open,
         logger,
+        allowLocalFallback: config?.tuxler?.requireActive === false,
       });
     } catch (err) {
       logger?.warn?.(`Geo egress (${attempt}/2): ${err.message}`);
+      if (err.code === 'TUXLER_SOCKS_OFFLINE' && config?.tuxler?.requireActive !== false) {
+        if (attempt >= 2) {
+          throw new TuxlerInactiveError(err.message);
+        }
+        await sleep(1_200);
+        continue;
+      }
       if (attempt < 2) await sleep(600);
     }
   }
@@ -187,6 +195,11 @@ async function rotateTuxlerIp(config, countryCode, logger) {
       `Tuxler egress | ip=${before.ip || '?'} cc=${before.countryCode || '?'} tz=${before.timezoneId || '?'} via=${via} (sem rotação)`
     );
     if (!before.viaSocks) {
+      if (config.tuxler?.requireActive !== false) {
+        throw new TuxlerInactiveError(
+          'Tuxler SOCKS não está roteando (geo via túnel falhou). Reconecte o app e aguarde 127.0.0.1:23321.'
+        );
+      }
       logger?.warn?.(
         'Tuxler conectado no app mas proxy local offline — abra o Tuxler, escolha o país e aguarde até socks=127.0.0.1:23321 responder.'
       );

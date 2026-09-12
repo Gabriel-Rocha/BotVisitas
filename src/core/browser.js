@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { getProxyLaunchArgs, getTuxlerLaunchArgs } = require('./proxy');
@@ -90,16 +90,47 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
   return { browser, activeProxy };
 }
 
+function isPidAlive(pid) {
+  if (!pid || pid <= 0) return false;
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync(`tasklist /FI "PID eq ${pid}" /NH`, {
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 5_000,
+      });
+      return String(out).includes(String(pid));
+    }
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function killProcessTree(pid, logger) {
   if (!pid || pid <= 0) return;
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
-        stdio: 'ignore',
-        windowsHide: true,
-      });
+      try {
+        execSync(`taskkill /F /T /PID ${pid}`, {
+          stdio: 'ignore',
+          windowsHide: true,
+          timeout: 10_000,
+        });
+      } catch {
+        spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+      }
     } else {
-      process.kill(pid, 'SIGKILL');
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        process.kill(pid, 'SIGKILL');
+      }
     }
     logger?.warn?.(`Processo Chromium ${pid} encerrado à força`);
   } catch (err) {
@@ -107,7 +138,22 @@ function killProcessTree(pid, logger) {
   }
 }
 
-async function closeBrowser(browser, logger, { forceMs = 8_000 } = {}) {
+async function ensureProcessDead(pid, logger, { rounds = 8, gapMs = 200 } = {}) {
+  if (!pid || pid <= 0) return;
+  if (!isPidAlive(pid)) return;
+
+  killProcessTree(pid, logger);
+  for (let i = 0; i < rounds; i += 1) {
+    await new Promise((r) => setTimeout(r, gapMs));
+    if (!isPidAlive(pid)) return;
+    if (i === 3 || i === rounds - 1) killProcessTree(pid, logger);
+  }
+  if (isPidAlive(pid)) {
+    logger?.warn?.(`Chromium pid ${pid} ainda vivo após taskkill — possível órfão de RAM`);
+  }
+}
+
+async function closeBrowser(browser, logger, { forceMs = 6_000 } = {}) {
   if (!browser) return;
   const proc = typeof browser.process === 'function' ? browser.process() : null;
   const pid = proc?.pid;
@@ -116,22 +162,36 @@ async function closeBrowser(browser, logger, { forceMs = 8_000 } = {}) {
 
   try {
     await Promise.race([
-      browser.close(),
+      browser.close().catch((err) => {
+        logger?.warn?.('browser.close():', err.message);
+      }),
       new Promise((resolve) => {
         forceTimer = setTimeout(() => {
           forced = true;
-          logger.warn(`browser.close() > ${forceMs}ms — matando árvore de processos`);
+          logger?.warn?.(`browser.close() > ${forceMs}ms — matando árvore de processos`);
           if (pid) killProcessTree(pid, logger);
           resolve();
         }, forceMs);
       }),
     ]);
-    if (!forced) logger.info('Browser encerrado');
   } catch (err) {
-    logger.warn('Falha ao encerrar browser:', err.message);
+    logger?.warn?.('Falha ao encerrar browser:', err.message);
     if (pid) killProcessTree(pid, logger);
   } finally {
     if (forceTimer) clearTimeout(forceTimer);
+    // Windows: close() “ok” ainda deixa renderers órfãos — sempre confirma morte do PID.
+    if (pid) {
+      await ensureProcessDead(pid, logger);
+    }
+    if (!forced) logger?.info?.('Browser encerrado');
   }
 }
-module.exports = { launchBrowser, closeBrowser, killProcessTree, resolveChromePath };
+
+module.exports = {
+  launchBrowser,
+  closeBrowser,
+  killProcessTree,
+  ensureProcessDead,
+  isPidAlive,
+  resolveChromePath,
+};

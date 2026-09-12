@@ -99,9 +99,22 @@
 - [x] TuxlerVPN (Windows): rotação residencial gratuita por worker (mutex + PowerShell)
 - [x] Tor SOCKS bloqueado (9050/9150)
 - [x] Watchdog de RAM + restart periódico do Chromium (anti OOM overnight)
+- [x] Watchdog RAM: recycle imediato (abort visita + taskkill árvore); restart também no caminho de erro; warn sustentado recicla
 - [x] TargetCloseError do stealth não derruba o processo (reuse page + ignore)
 - [x] Histórico local de egress Tuxler (`logs/tuxler-exits.json`)
 - [x] VISIT_MAX_SEC aborta o goto e solta o slot SOCKS; timer de closeBrowser não mata o Chromium novo
+- [x] Timeout não derruba Tuxler; SOCKS saturado pausa workers (sem fallback IP local)
+- [x] Clique CPM: dwell antes do CTR; hybrid só conta URL change; OK não inclui página vazia
+- [x] CLICK_MODE=engage: navega links/CTAs reais (sem centro); BROWSE_PAGES abre links da página
+- [x] Perfil throughput: sem referrer/browse extra, dwell curto, engage em CTA/ad (volume CPM)
+- [x] Espera UI antes de “página vazia”; engage com interativos; getStats sem crash main-frame
+- [x] Anti-travamento: fail-fast blank, corta ping-pong redirect, restart com jitter, troca proxy no vazio
+- [x] Zero-erro: pageUrl() seguro, net::ERR_* ampliado (rotação), pool com IPs de reserva, shutdown sem warn falso
+- [x] TUXLER_NAV_SLOTS=0 no Tuxler limita gotos a min(4, workers) (SOCKS único)
+- [x] PROXY_ENABLED + PROXY_SERVER/LIST: 1 sticky HTTP por worker (12 paralelos reais)
+- [x] PROXY_LIST_URL (Webshare host:port:user:pass) + geo via auth do endpoint HTTP
+- [x] Cliques verificados classificados por destino (anúncio / site / externo) no log e no painel
+- [x] Deadlock recycle↔ensureBrowser corrigido (startBrowser separado) + WORKER_STALL_SEC destrava worker parado
 
 ---
 
