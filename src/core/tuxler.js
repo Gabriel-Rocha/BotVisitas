@@ -10,14 +10,16 @@
 
 const { spawn } = require('child_process');
 const path = require('path');
-const { lookupTuxlerEgress, lookupGeoViaSocks, clearGeoCache, COUNTRY_HINTS } = require('./geo');
+const { lookupTuxlerEgress, lookupGeoViaSocks, clearGeoCache, COUNTRY_HINTS, lookupGeo } = require('./geo');
 const {
   waitForTuxlerSocks,
   resetTuxlerSocksCache,
   resolveTuxlerSocksEndpoint,
   probeTuxlerSocks,
+  readWindowsSystemProxy,
 } = require('./proxy');
 const { sleep } = require('../utils/sleep');
+const { getCurrentPublicIp } = require('./ip');
 
 class TuxlerInactiveError extends Error {
   constructor(message) {
@@ -468,6 +470,115 @@ async function probeTuxlerActive(config, logger = null) {
   }
 }
 
+/**
+ * Gate EGRESS=tuxler-system: ProxyEnable do Windows + país do IP público.
+ * Node.js NÃO herda proxy WinINET — mede egress via SOCKS do Tuxler (se online)
+ * ou via PowerShell (respeita proxy do sistema com mais frequência).
+ */
+async function validateTuxlerSystem(config, logger, { strategy = null } = {}) {
+  if (String(config.egress || '').toLowerCase() !== 'tuxler-system') {
+    return { ok: true, skipped: true, reason: 'egress-not-tuxler-system' };
+  }
+
+  if (strategy?.requiresBrowser === false) {
+    return { ok: true, skipped: true, reason: 'no-browser' };
+  }
+
+  const requireActive = config.tuxler?.requireActive !== false;
+
+  if (!isWindows()) {
+    const msg = 'EGRESS=tuxler-system exige Windows (proxy do sistema / Tuxler).';
+    if (requireActive) throw new TuxlerInactiveError(msg);
+    logger?.warn?.(msg);
+    return { ok: false, reason: msg };
+  }
+
+  const sys = readWindowsSystemProxy();
+  if (!sys.enabled) {
+    const msg =
+      'ProxyEnable=0 — Tuxler não está aplicando proxy no Windows. ' +
+      'Abra o Tuxler → escolha o país (ex. Algeria) → Connect/Activate e aguarde. ' +
+      'Não ligue o proxy manualmente; o app faz isso ao conectar.';
+    if (requireActive) throw new TuxlerInactiveError(msg);
+    logger?.warn?.(msg);
+    return { ok: false, reason: msg, proxy: sys };
+  }
+
+  logger?.info?.(
+    `tuxler-system | proxy Windows ON (${sys.server || '?'}) — validando IP/país...`
+  );
+
+  clearGeoCache();
+  let ip = null;
+  let geo = null;
+  let via = null;
+
+  const socks = await probeTuxlerSocks(config, logger);
+  if (socks.open) {
+    try {
+      geo = await lookupGeoViaSocks(socks.host, socks.port);
+      ip = geo?.ip || null;
+      via = 'socks';
+    } catch (err) {
+      logger?.warn?.(`Geo via SOCKS falhou (${err.message}) — tentando PowerShell`);
+    }
+  }
+
+  if (!ip) {
+    try {
+      const { getPublicIpViaWindowsProxy } = require('./ip');
+      ip = await getPublicIpViaWindowsProxy();
+      geo = await lookupGeo(ip);
+      via = 'powershell';
+    } catch (err) {
+      const msg =
+        `Proxy Windows ON, mas não deu para medir o IP de saída (${err.message}). ` +
+        'Confirme que o Tuxler está Connected e o SOCKS 127.0.0.1:23321 responde.';
+      if (requireActive) throw new TuxlerInactiveError(msg);
+      logger?.warn?.(msg);
+      return { ok: false, reason: msg, proxy: sys };
+    }
+  }
+
+  const expectedRaw =
+    (config.egressExpectedCc || config.tuxler?.expectedCc || '').trim().toLowerCase();
+  const expected = expectedRaw.replace(/[^a-z]/g, '').slice(0, 2);
+  const actual = String(geo?.countryCode || '').trim().toLowerCase();
+
+  logger?.info?.(
+    `tuxler-system | ip=${ip} cc=${actual || '?'} via=${via} tz=${geo?.timezoneId || '?'} org=${geo?.isp || geo?.org || '?'}`
+  );
+
+  // País esperado é OPCIONAL — Tuxler troca de país; só valide se EGRESS_EXPECTED_CC estiver setado.
+  if (expected && actual && actual !== expected) {
+    const msg =
+      `País do IP é ${actual.toUpperCase()}, esperado ${expected.toUpperCase()} (EGRESS_EXPECTED_CC). ` +
+      `Esvazie EGRESS_EXPECTED_CC se for rotacionar países no Tuxler, ou conecte ${expected.toUpperCase()}.`;
+    if (requireActive) throw new TuxlerInactiveError(msg);
+    logger?.warn?.(msg);
+    return { ok: false, reason: msg, proxy: sys, geo, ip };
+  }
+
+  if (expected && !actual) {
+    const msg = `Não foi possível ler countryCode do IP ${ip} para validar EGRESS_EXPECTED_CC=${expected}`;
+    if (requireActive) throw new TuxlerInactiveError(msg);
+    logger?.warn?.(msg);
+    return { ok: false, reason: msg, proxy: sys, ip };
+  }
+
+  if (!expected) {
+    logger?.info?.(
+      'EGRESS_EXPECTED_CC vazio — país livre (Tuxler pode trocar). Gate = proxy Windows ON + IP mensurável.'
+    );
+  }
+
+  logger?.info?.(
+    `tuxler-system validado | ip=${ip} cc=${(actual || '?').toUpperCase()} proxy=${sys.server || '?'}`
+  );
+
+  return { ok: true, proxy: sys, geo, ip, via };
+}
+
 module.exports = {
   DEFAULT_EXE,
   isWindows,
@@ -477,6 +588,7 @@ module.exports = {
   createTuxlerLease,
   assertTuxlerReady,
   validateTuxlerActive,
+  validateTuxlerSystem,
   probeTuxlerActive,
   toTuxlerSlot,
 };

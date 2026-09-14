@@ -160,12 +160,22 @@ function loadConfig() {
       socksWaitMs: int(process.env.TUXLER_SOCKS_WAIT_MS, 20_000),
       socksHost: (process.env.TUXLER_SOCKS_HOST || '').trim() || null,
       socksPort: int(process.env.TUXLER_SOCKS_PORT, 0) || null,
-      requireActive: bool(process.env.TUXLER_REQUIRE_ACTIVE, egress === 'tuxler'),
+      requireActive: bool(
+        process.env.TUXLER_REQUIRE_ACTIVE,
+        egress === 'tuxler' || egress === 'tuxler-system'
+      ),
+      expectedCc: (process.env.EGRESS_EXPECTED_CC || process.env.TUXLER_EXPECTED_CC || '')
+        .trim()
+        .toLowerCase(),
       clickRelX: float(process.env.TUXLER_CLICK_X, 0.5),
       clickRelY: float(process.env.TUXLER_CLICK_Y, 0.68),
       activateRelX: float(process.env.TUXLER_ACTIVATE_X, 0.5),
       activateRelY: float(process.env.TUXLER_ACTIVATE_Y, 0.58),
     },
+
+    egressExpectedCc: (process.env.EGRESS_EXPECTED_CC || process.env.TUXLER_EXPECTED_CC || '')
+      .trim()
+      .toLowerCase(),
 
     // Países ISO-2 por worker
     workerCountries: (

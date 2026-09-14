@@ -5,7 +5,7 @@ const { createBufferedLogger } = require('./bufferedLogger');
 const { loadConfig } = require('../config');
 const { getSafeConfig } = require('./configStore');
 const { resolveStrategy } = require('../strategies');
-const { validateTuxlerActive } = require('../core/tuxler');
+const { validateTuxlerActive, validateTuxlerSystem } = require('../core/tuxler');
 const logBuffer = require('./logBuffer');
 const { sleep } = require('../utils/sleep');
 const {
@@ -138,6 +138,16 @@ async function start(options = {}) {
       await validateTuxlerActive(config, logger, { strategy });
     } catch (err) {
       logger.error('Start bloqueado — Tuxler inativo:', err.message);
+      return { ok: false, error: err.message };
+    }
+  }
+
+  if (config.egress === 'tuxler-system' && config.strategy !== 'dryRun') {
+    try {
+      const strategy = resolveStrategy(config.strategy);
+      await validateTuxlerSystem(config, logger, { strategy });
+    } catch (err) {
+      logger.error('Start bloqueado — tuxler-system:', err.message);
       return { ok: false, error: err.message };
     }
   }

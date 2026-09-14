@@ -35,6 +35,7 @@ const COUNTRY_UTC_OFFSET = {
   JP: 9,
   HK: 8,
   VE: -4,
+  DZ: 1,
 };
 
 function dayKey(d = new Date()) {

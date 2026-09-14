@@ -3,8 +3,8 @@
 const { createWorker } = require('./worker');
 const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices');
 const { sleep } = require('../utils/sleep');
-const { createTuxlerLease, assertTuxlerReady, validateTuxlerActive } = require('./tuxler');
-const { FREE_PLAN_MAX, resetTuxlerSocksCache, readWindowsSystemProxy } = require('./proxy');
+const { createTuxlerLease, assertTuxlerReady, validateTuxlerActive, validateTuxlerSystem } = require('./tuxler');
+const { FREE_PLAN_MAX, resetTuxlerSocksCache } = require('./proxy');
 const { clearGeoCache } = require('./geo');
 const { createMemoryWatch } = require('./memoryWatch');
 const { getCurrentPublicIp } = require('./ip');
@@ -138,21 +138,8 @@ function createLoop({ config, strategy, logger }) {
       }
     } else if (egress === 'tuxler-system') {
       proxyLease = null;
-      const sys = readWindowsSystemProxy();
-      if (!sys.enabled) {
-        logger.warn(
-          'EGRESS=tuxler-system mas ProxyEnable=0 no Windows — abra o Tuxler, conecte o país e aguarde o proxy do sistema.'
-        );
-      } else {
-        logger.info(
-          `EGRESS=tuxler-system | proxy Windows ON (${sys.server || '?'}) — Chromium herda (estilo v1)`
-        );
-      }
-      try {
-        const ip = await getCurrentPublicIp({ force: true });
-        logger.info(`IP público atual: ${ip}`);
-      } catch (err) {
-        logger.warn(`Não foi possível ler IP público: ${err.message}`);
+      if (strategy.requiresBrowser !== false) {
+        await validateTuxlerSystem(config, logger, { strategy });
       }
     } else if (egress === 'native') {
       proxyLease = null;

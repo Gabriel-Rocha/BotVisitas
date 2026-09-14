@@ -53,6 +53,7 @@ const COUNTRY_HINTS = {
   AU: { timezoneId: 'Australia/Sydney', locale: 'en-AU' },
   NZ: { timezoneId: 'Pacific/Auckland', locale: 'en-NZ' },
   ZA: { timezoneId: 'Africa/Johannesburg', locale: 'en-ZA' },
+  DZ: { timezoneId: 'Africa/Algiers', locale: 'ar-DZ' },
   AE: { timezoneId: 'Asia/Dubai', locale: 'ar-AE' },
   RU: { timezoneId: 'Europe/Moscow', locale: 'ru-RU' },
 };

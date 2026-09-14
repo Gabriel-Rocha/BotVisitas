@@ -86,6 +86,31 @@ function clearIpCache() {
   cachedIp = null;
 }
 
+/**
+ * IP visto através do proxy do Windows (PowerShell / WinINET).
+ * Node puro ignora ProxyEnable — use isto para validar tuxler-system.
+ */
+async function getPublicIpViaWindowsProxy({ timeoutMs = 20_000 } = {}) {
+  if (process.platform !== 'win32') {
+    return getCurrentPublicIp({ force: true });
+  }
+  const script =
+    "$ProgressPreference='SilentlyContinue'; " +
+    "(Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 15).ToString().Trim()";
+  const { stdout } = await execFileAsync(
+    'powershell.exe',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
+    { timeout: timeoutMs, windowsHide: true, encoding: 'utf8' }
+  );
+  const ip = String(stdout || '').trim();
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && !ip.includes(':')) {
+    throw new Error(`IP inválido via PowerShell: ${ip || '(vazio)'}`);
+  }
+  cachedIp = { ip, at: Date.now() };
+  if (!expectedIp) expectedIp = ip;
+  return ip;
+}
+
 function getExpectedIp() {
   return expectedIp;
 }
@@ -175,6 +200,7 @@ async function rotateIp({ config = {}, logger = null, force = false } = {}) {
 
 module.exports = {
   getCurrentPublicIp,
+  getPublicIpViaWindowsProxy,
   clearIpCache,
   getExpectedIp,
   setExpectedIp,
