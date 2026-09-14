@@ -20,8 +20,43 @@ function parseCountryList(raw) {
     .filter((s) => /^[a-z]{2}$/.test(s));
 }
 
-/** Proxy HTTP explícito (legado) — vazio por padrão. */
-function getProxyLaunchArgs(_selected) {
+/**
+ * Args de proxy do Chromium conforme EGRESS.
+ * native → --no-proxy-server (bloqueia herança do ProxyEnable do Windows/Tuxler).
+ * tuxler-system → [] (herda proxy do Windows — comportamento v1).
+ * http-pool → --proxy-server=http://HOST:PORT
+ * tuxler → tratado em getTuxlerLaunchArgs (não chamar daqui).
+ */
+function getProxyLaunchArgs(configOrSelected = null, maybeSelected = undefined) {
+  // Compat: getProxyLaunchArgs(selected) legado OU getProxyLaunchArgs(config, selected)
+  let config = null;
+  let selected = null;
+  if (maybeSelected !== undefined || (configOrSelected && configOrSelected.egress)) {
+    config = configOrSelected;
+    selected = maybeSelected || null;
+  } else {
+    selected = configOrSelected;
+  }
+
+  const mode = String(config?.egress || process.env.EGRESS || 'native')
+    .trim()
+    .toLowerCase();
+
+  if (mode === 'native' || !mode) {
+    // Sem esta flag o Chromium herda HKCU\Internet Settings (Tuxler SOCKS global).
+    return ['--no-proxy-server'];
+  }
+
+  if (mode === 'tuxler-system') {
+    // Estilo v1: Chromium herda ProxyEnable do Windows (Tuxler no app).
+    // Sem --proxy-server e sem --no-proxy-server.
+    return [];
+  }
+
+  if (mode === 'http-pool' && selected?.host && selected?.port) {
+    return [`--proxy-server=http://${selected.host}:${selected.port}`];
+  }
+
   return [];
 }
 

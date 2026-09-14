@@ -44,6 +44,15 @@ CREATE INDEX IF NOT EXISTS idx_bot_runs_started_at ON bot_runs (started_at DESC)
 CREATE INDEX IF NOT EXISTS idx_bot_runs_status ON bot_runs (status);
 CREATE INDEX IF NOT EXISTS idx_run_logs_run_ts ON run_logs (run_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_run_snapshots_run_ts ON run_snapshots (run_id, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS visit_metrics (
+  id BIGSERIAL PRIMARY KEY,
+  run_id UUID REFERENCES bot_runs(id) ON DELETE SET NULL,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  payload JSONB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_visit_metrics_captured ON visit_metrics (captured_at DESC);
 `;
 
 async function migrate() {

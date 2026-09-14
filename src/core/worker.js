@@ -1,14 +1,31 @@
 'use strict';
 
+const path = require('path');
+const crypto = require('crypto');
 const { launchBrowser, closeBrowser } = require('./browser');
 const { createSession, recreateSession } = require('./session');
 const { resolveSessionLocale } = require('./geo');
+const { pickSessionPersona } = require('./devices');
 const { randomInt } = require('../utils/random');
 const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
 const { isTransientProxyError } = require('../utils/netErrors');
+const {
+  getCurrentPublicIp,
+  checkInvoluntaryRotation,
+  isPausedForIpChange,
+} = require('./ip');
+const { getIpDayStats } = require('./schedule');
+const { insertVisitMetric } = require('../db/runs');
+
+function hashPersona(persona) {
+  const raw = `${persona.userAgent}|${persona.viewport?.width}x${persona.viewport?.height}`;
+  return crypto.createHash('sha1').update(raw).digest('hex').slice(0, 12);
+}
 
 /**
- * Um worker = 1 Chromium (+ 1 proxy exclusivo se houver lease) + 1 perfil de device.
+ * Um worker = 1 identidade = 1 perfil persistente.
+ * Persona sorteada UMA vez no createWorker — nunca por visita.
+ * Visitas passam pela fila global (visitGate) quando VISIT_SERIAL=true.
  */
 function createWorker({
   workerId,
@@ -16,6 +33,7 @@ function createWorker({
   strategy,
   logger,
   proxyLease = null,
+  visitGate = null,
   deviceType = 'desktop',
   deviceProfile = null,
   preferredCountry = null,
@@ -23,10 +41,38 @@ function createWorker({
   const needsBrowser = strategy.requiresBrowser !== false;
   const prefix = `[w${workerId}]`;
   const device = deviceProfile ? { type: deviceType, profile: deviceProfile } : null;
+  const egress = String(config.egress || 'native').toLowerCase();
+
+  // Identidade fixa do boot ao shutdown
+  const persona = deviceProfile
+    ? (() => {
+        const p = pickSessionPersona(deviceProfile);
+        p.hash = hashPersona(p);
+        return p;
+      })()
+    : null;
+  const screenOffset = {
+    x: randomInt(0, 96),
+    y: randomInt(0, 72),
+  };
+  const userDataDir = path.join(config.profilesDir || path.join(process.cwd(), 'profiles'), `w${workerId}`);
+
+  const visitQuality = {
+    sessions: 0,
+    withCookies: 0,
+    withoutCallback: 0,
+    hitsToday: 0,
+    publicIp: null,
+    privacyType: null,
+    asn: null,
+    org: null,
+    sessionMs: [],
+  };
 
   const stats = {
     workerId,
     deviceType,
+    personaHash: persona?.hash || null,
     startedAt: Date.now(),
     iterations: 0,
     ok: 0,
@@ -39,6 +85,7 @@ function createWorker({
     timezoneId: null,
     locale: null,
     geoCountry: null,
+    visitQuality,
   };
 
   let browser = null;
@@ -50,14 +97,16 @@ function createWorker({
   let captureInProgress = null;
   let lastPreview = null;
   let recycleRequested = null;
+  let publicIp = null;
 
   function log(level, ...args) {
     logger[level](prefix, ...args);
   }
 
   async function acquireProxy() {
-    if (!proxyLease) return null;
+    if (!proxyLease || egress !== 'tuxler') return null;
     const proxy = await proxyLease.acquire(preferredCountry);
+    if (!proxy) return null;
     stats.proxyLabel = proxy.label;
     log('info', `Tuxler adquirido: ${proxy.label}`);
     return proxy;
@@ -72,7 +121,7 @@ function createWorker({
   }
 
   async function acquireUsableProxy() {
-    if (!proxyLease) return null;
+    if (!proxyLease || egress !== 'tuxler') return { proxy: null, hints: await resolveLocaleForProxy(null) };
     activeProxy = await acquireProxy();
     const hints = await resolveLocaleForProxy(activeProxy);
     return { proxy: activeProxy, hints };
@@ -82,8 +131,8 @@ function createWorker({
     const hints = await resolveSessionLocale({
       egressGeo: proxy?.geo || null,
       proxy: proxy?.ip ? { host: proxy.ip, label: proxy.label } : null,
-      fallbackTimezone: config.stealth?.timezoneId || 'UTC',
-      fallbackLocale: config.stealth?.locale || 'en-US',
+      fallbackTimezone: config.stealth?.timezoneId || 'America/Sao_Paulo',
+      fallbackLocale: config.stealth?.locale || 'pt-BR',
       enabled: config.stealth?.geoTz !== false,
       logger: {
         info: (...a) => log('info', ...a),
@@ -102,7 +151,7 @@ function createWorker({
     if (!needsBrowser) return;
     if (browser && browser.isConnected()) return;
 
-    log('info', 'Subindo Chromium...');
+    log('info', `Subindo Chromium (perfil ${userDataDir})...`);
 
     await closeBrowser(browser, {
       info: (...a) => log('info', ...a),
@@ -110,7 +159,7 @@ function createWorker({
     });
 
     let localeHints;
-    if (!activeProxy && proxyLease) {
+    if (egress === 'tuxler' && !activeProxy && proxyLease) {
       const acquired = await acquireUsableProxy();
       localeHints = acquired.hints;
     } else {
@@ -125,7 +174,7 @@ function createWorker({
         debug: (...a) => log('debug', ...a),
       },
       null,
-      { lang: localeHints.locale }
+      { lang: localeHints.locale, userDataDir }
     );
 
     browser = launched.browser;
@@ -139,7 +188,9 @@ function createWorker({
       },
       null,
       device,
-      localeHints
+      localeHints,
+      persona,
+      screenOffset
     );
   }
 
@@ -157,8 +208,8 @@ function createWorker({
     lastPreview = null;
 
     const tuxlerSkip =
-      config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
-    if (proxyLease && !tuxlerSkip) {
+      egress === 'tuxler' && (config.tuxler?.rotateMode || 'skip') === 'skip';
+    if (proxyLease && egress === 'tuxler' && !tuxlerSkip) {
       releaseProxy();
       try {
         await acquireUsableProxy();
@@ -171,10 +222,6 @@ function createWorker({
 
     stats.browserRestarts += 1;
     await ensureBrowser();
-  }
-
-  async function restartBrowserWithNewProxy() {
-    await recycleBrowser('periódico');
   }
 
   async function maybeRestartBrowser() {
@@ -195,7 +242,7 @@ function createWorker({
   }
 
   async function releaseTuxlerTurn() {
-    if (!config.tuxler?.enabled || !proxyLease) return;
+    if (egress !== 'tuxler' || !proxyLease) return;
     await closeBrowser(browser, {
       info: (...a) => log('info', ...a),
       warn: (...a) => log('warn', ...a),
@@ -245,55 +292,181 @@ function createWorker({
     }
   }
 
+  async function waitCadence() {
+    try {
+      publicIp = await getCurrentPublicIp();
+    } catch (err) {
+      log('warn', `IP público indisponível: ${err.message}`);
+      publicIp = publicIp || 'unknown';
+    }
+    visitQuality.publicIp = publicIp;
+
+    while (isPausedForIpChange() && !stopping) {
+      log('warn', 'Pausado por mudança involuntária de IP — aguardando confirmação/estabilização');
+      await sleepInterruptible(30_000, {
+        shouldStop: () => stopping,
+        signal: abortController?.signal,
+      });
+    }
+
+    const country =
+      sessionLocale?.countryCode ||
+      preferredCountry ||
+      stats.geoCountry ||
+      'BR';
+
+    if (!visitGate) {
+      log('warn', 'visitGate ausente — visita sem fila serial');
+      return { skipped: false, hitsToday: 0, release: () => {} };
+    }
+
+    return visitGate.acquire({
+      countryCode: country,
+      workerId,
+      logger: {
+        info: (...a) => log('info', ...a),
+        warn: (...a) => log('warn', ...a),
+      },
+      shouldStop: () => stopping,
+      signal: abortController?.signal,
+    });
+  }
+
+  async function persistVisit(result, sessionStartedAt, cadenceInfo) {
+    const tempoSessaoMs = Date.now() - sessionStartedAt;
+    const meta = result?.meta || {};
+    const clicks = meta.clickCount ?? meta.verifiedClicks ?? 0;
+    const cookiesPresent = Boolean(page?.__botCookiesPresent);
+    const nCookies = page?.__botNCookies ?? 0;
+    const popupMs = page?.__botPopupMeta?.lingerMs || 0;
+    const callback = Boolean(meta.callbackAdsterra ?? meta.adsterraCallback ?? meta.hasCallback);
+    const hosts = meta.hostsSeen || meta.hosts_vistos || [];
+    const bytes = meta.bytesTotal ?? meta.bytes_totais ?? null;
+    const firstClickMs = meta.timeToFirstClickMs ?? meta.tempo_ate_primeiro_clique_ms ?? null;
+
+    visitQuality.sessions += 1;
+    if (cookiesPresent) visitQuality.withCookies += 1;
+    if (!callback && result?.ok) visitQuality.withoutCallback += 1;
+    visitQuality.sessionMs.push(tempoSessaoMs);
+    if (visitQuality.sessionMs.length > 200) visitQuality.sessionMs.shift();
+
+    const dayStats = getIpDayStats(publicIp, config.scheduleFile);
+    visitQuality.hitsToday = dayStats.hitsToday || cadenceInfo?.hitsToday || 0;
+
+    const payload = {
+      worker_index: workerId,
+      public_ip: publicIp,
+      asn: visitQuality.asn,
+      org: visitQuality.org,
+      privacy_type: visitQuality.privacyType,
+      country: stats.geoCountry,
+      egress_mode: egress,
+      hits_hoje_no_ip: visitQuality.hitsToday,
+      minutos_desde_ultimo_hit: cadenceInfo?.minutesSinceLastHit ?? dayStats.minutesSinceLastHit,
+      persona_hash: persona?.hash || null,
+      cookies_presentes: cookiesPresent,
+      n_cookies: nCookies,
+      popup_aberta_ms: popupMs,
+      cliques: clicks,
+      tempo_ate_primeiro_clique_ms: firstClickMs,
+      callback_adsterra_disparou: callback,
+      hosts_vistos: hosts,
+      bytes_totais: bytes,
+      tempo_sessao_ms: tempoSessaoMs,
+      ok: Boolean(result?.ok),
+      quality: result?.quality || null,
+    };
+
+    try {
+      await insertVisitMetric(payload);
+    } catch (err) {
+      log('debug', 'insertVisitMetric:', err.message);
+    }
+
+    return payload;
+  }
+
   async function tick() {
     if (stopping) return;
     abortController = new AbortController();
-    await ensureBrowser();
 
-    const result = await runStrategyWithCap();
+    let cadenceInfo = null;
+    let slotRelease = null;
+    try {
+      cadenceInfo = await waitCadence();
+      if (cadenceInfo?.skipped || stopping) return;
+      slotRelease = cadenceInfo.release || null;
 
-    if (result?.ok) {
-      stats.ok += 1;
-      const q = result.quality || 'offer';
-      if (q === 'intermediate') stats.intermediate += 1;
-      else stats.offers += 1;
-      const visitClicks = result.meta?.clickCount ?? result.meta?.verifiedClicks ?? 0;
-      stats.clicks += visitClicks;
-      if (visitClicks > 0) {
-        log('info', `Cliques na visita: ${visitClicks} (total worker: ${stats.clicks})`);
+      const sessionStartedAt = Date.now();
+      await ensureBrowser();
+
+      const result = await runStrategyWithCap();
+
+      if (visitGate) {
+        const { markHit } = require('./schedule');
+        const marked = markHit(
+          publicIp && publicIp !== 'unknown' ? publicIp : null,
+          config.scheduleFile
+        );
+        visitQuality.hitsToday = marked.hitsToday;
       }
-    } else {
-      stats.errors += 1;
-    }
 
-    stats.iterations += 1;
+      await persistVisit(result, sessionStartedAt, cadenceInfo);
 
-    if (recycleRequested) {
-      const reason = recycleRequested;
-      recycleRequested = null;
-      await recycleBrowser(reason);
-      return;
-    }
+      if (result?.ok) {
+        stats.ok += 1;
+        const q = result.quality || 'offer';
+        if (q === 'intermediate') stats.intermediate += 1;
+        else stats.offers += 1;
+        const visitClicks = result.meta?.clickCount ?? result.meta?.verifiedClicks ?? 0;
+        stats.clicks += visitClicks;
+        if (visitClicks > 0) {
+          log('info', `Cliques na visita: ${visitClicks} (total worker: ${stats.clicks})`);
+        }
+      } else {
+        stats.errors += 1;
+      }
 
-    // Fila só quando Tuxler rotaciona IP entre workers (restart/coords).
-    const tuxlerRotates = (config.tuxler?.rotateMode || 'skip').toLowerCase() !== 'skip';
-    const tuxlerTurnQueue = Boolean(
-      config.tuxler?.enabled &&
-        proxyLease &&
-        tuxlerRotates &&
-        (config.concurrency || 1) > 1
-    );
-    if (tuxlerTurnQueue) {
-      await releaseTuxlerTurn();
-    } else {
-      await maybeRestartBrowser();
+      stats.iterations += 1;
+
+      const every = config.ipCheckEveryVisits ?? 10;
+      if (every > 0 && stats.iterations % every === 0) {
+        try {
+          await checkInvoluntaryRotation({
+            info: (...a) => log('info', ...a),
+            warn: (...a) => log('warn', ...a),
+          });
+        } catch (err) {
+          log('debug', 'checkInvoluntaryRotation:', err.message);
+        }
+      }
+
+      if (recycleRequested) {
+        const reason = recycleRequested;
+        recycleRequested = null;
+        await recycleBrowser(reason);
+        return;
+      }
+
+      const tuxlerRotates =
+        egress === 'tuxler' && (config.tuxler?.rotateMode || 'skip').toLowerCase() !== 'skip';
+      const tuxlerTurnQueue = Boolean(
+        tuxlerRotates && proxyLease && (config.concurrency || 1) > 1
+      );
+      if (tuxlerTurnQueue) {
+        await releaseTuxlerTurn();
+      } else {
+        await maybeRestartBrowser();
+      }
+    } finally {
+      if (typeof slotRelease === 'function') slotRelease();
     }
   }
 
   async function run() {
     log(
       'info',
-      `Worker start | device=${deviceType} | strategy=${strategy.name} | browser=${needsBrowser ? 'sim' : 'não'}`
+      `Worker start | device=${deviceType} | persona=${persona?.hash || 'n/a'} | egress=${egress} | strategy=${strategy.name}`
     );
 
     while (!stopping) {
@@ -321,7 +494,9 @@ function createWorker({
               },
               activeProxy,
               device,
-              sessionLocale
+              sessionLocale,
+              persona,
+              screenOffset
             );
           } catch {
             await releaseTuxlerTurn();
@@ -331,28 +506,14 @@ function createWorker({
 
         if (needsBrowser) {
           const tuxlerSkip =
-            config.tuxler?.enabled && (config.tuxler?.rotateMode || 'skip') === 'skip';
+            egress === 'tuxler' && (config.tuxler?.rotateMode || 'skip') === 'skip';
           const rotateProxy =
-            Boolean(proxyLease) && isTransientProxyError(err) && !tuxlerSkip;
+            egress === 'tuxler' && Boolean(proxyLease) && isTransientProxyError(err) && !tuxlerSkip;
           try {
             if (rotateProxy) {
               log('warn', 'Erro de túnel/proxy — trocando sticky e reiniciando browser');
               await releaseTuxlerTurn();
               await ensureBrowser();
-            } else if (isTransientProxyError(err)) {
-              log('warn', 'Erro de rede/proxy — recriando sessão (Tuxler skip, sem rotação)');
-              page = await recreateSession(
-                browser,
-                page,
-                config,
-                {
-                  info: (...a) => log('info', ...a),
-                  debug: (...a) => log('debug', ...a),
-                },
-                activeProxy,
-                device,
-                sessionLocale
-              );
             } else {
               page = await recreateSession(
                 browser,
@@ -364,7 +525,9 @@ function createWorker({
                 },
                 activeProxy,
                 device,
-                sessionLocale
+                sessionLocale,
+                persona,
+                screenOffset
               );
             }
           } catch {
@@ -375,15 +538,22 @@ function createWorker({
 
       if (stopping) break;
 
-      const waitSec = randomInt(config.intervalMinSec, config.intervalMaxSec);
-      log('info', `Aguardando ${waitSec}s...`);
-      try {
-        await sleepInterruptible(waitSec * 1000, {
-          shouldStop: () => stopping,
-          signal: abortController?.signal,
-        });
-      } catch {
-        break;
+      // INTERVAL_* legado só como jitter curto pós-visita; cadência real é HIT_*
+      const minI = config.intervalMinSec ?? 0;
+      const maxI = config.intervalMaxSec ?? 0;
+      if (maxI > 0) {
+        const waitSec = randomInt(minI, maxI);
+        if (waitSec > 0) {
+          log('debug', `Jitter pós-visita ${waitSec}s...`);
+          try {
+            await sleepInterruptible(waitSec * 1000, {
+              shouldStop: () => stopping,
+              signal: abortController?.signal,
+            });
+          } catch {
+            break;
+          }
+        }
       }
     }
   }
@@ -467,6 +637,7 @@ function createWorker({
       currentUrl: page && !page.isClosed() ? page.url() : null,
       previewCapturedAt: lastPreview?.capturedAt || null,
       pageTitle: lastPreview?.title || '',
+      visitQuality: { ...visitQuality, sessionMs: [...visitQuality.sessionMs] },
     };
   }
 

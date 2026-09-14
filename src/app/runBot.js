@@ -34,7 +34,7 @@ function createBotSession({ logger, overrides = {} } = {}) {
 
   log.info('BotVisitas — session start');
   log.info(
-    `strategy=${config.strategy} | headless=${config.headless} | tuxler=${Boolean(config.tuxler?.enabled)} | concurrency=${config.concurrency}`
+    `strategy=${config.strategy} | headless=${config.headless} | egress=${config.egress || 'native'} | concurrency=${config.concurrency}`
   );
   if (config.deviceMix) {
     log.info(`DEVICE_MIX=${config.deviceMix}`);
@@ -58,6 +58,7 @@ function publicStatusSnapshot(config, loop, running) {
     headless: config.headless,
     concurrency: config.concurrency,
     deviceMix: config.deviceMix || '',
+    egress: config.egress || 'tuxler-system',
     tuxlerEnabled: Boolean(config.tuxler?.enabled),
     targetUrls: config.targetUrls || [],
     targetSource: config.targetSource || 'none',
@@ -72,8 +73,11 @@ function publicStatusSnapshot(config, loop, running) {
           browserRestarts: stats.browserRestarts || 0,
           uptimeSec: stats.uptimeSec,
           concurrency: stats.concurrency,
+          egress: stats.egress || config.egress || 'tuxler-system',
           devices: stats.devices || {},
           memory: stats.memory || null,
+          cadence: stats.cadence || null,
+          visitQuality: stats.visitQuality || null,
           workers: (stats.workers || []).map((w) => ({
             workerId: w.workerId,
             deviceType: w.deviceType || 'desktop',
@@ -83,10 +87,12 @@ function publicStatusSnapshot(config, loop, running) {
             errors: w.errors,
             iterations: w.iterations,
             proxyLabel: w.proxyLabel,
+            personaHash: w.personaHash || null,
             uptimeSec: w.uptimeSec,
             currentUrl: w.currentUrl,
             pageTitle: w.pageTitle,
             previewCapturedAt: w.previewCapturedAt,
+            visitQuality: w.visitQuality || null,
           })),
         }
       : null,

@@ -158,14 +158,84 @@ export default function MetricsPanel({ status }) {
           <div className="value">{status.targetUrls?.length || 0}</div>
         </div>
         <div className="metric">
-          <div className="label">Tuxler</div>
-          <div className="value">{status.tuxlerEnabled ? 'on' : 'off'}</div>
+          <div className="label">Egress</div>
+          <div className="value value-sm">{stats.egress || status.egress || 'native'}</div>
         </div>
         <div className="metric">
           <div className="label">Iterações</div>
           <div className="value">{stats.iterations || 0}</div>
         </div>
       </div>
+
+      {(() => {
+        const vq = stats.visitQuality || summary?.visits || {};
+        const cadence = stats.cadence || {};
+        const softCap = vq.hitCap || cadence.softCap || 1000;
+        const hardCap = vq.hardCap || cadence.hardCap || 2500;
+        const hitsToday = vq.hitsToday ?? cadence.hitsToday ?? 0;
+        const cookieRate = vq.cookieRate ?? 0;
+        const noCb = vq.noCallbackRate ?? 0;
+        const privacy = vq.privacyType;
+        const softUntil = vq.softPauseUntil || cadence.softPauseUntil;
+        const privacyTone =
+          !privacy || privacy === 'residential' || privacy === ''
+            ? 'ok'
+            : /vpn|proxy|hosting/i.test(String(privacy))
+              ? 'err'
+              : 'warn';
+        return (
+          <section className="panel full" style={{ marginTop: 16 }}>
+            <h2>Cadência / volume</h2>
+            <div className="grid metrics-grid">
+              <div className="metric">
+                <div className="label">Hits hoje</div>
+                <div className="value value-sm">
+                  {hitsToday}/{softCap}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="label">Hard cap</div>
+                <div className="value value-sm">{hardCap}</div>
+              </div>
+              <div className="metric">
+                <div className="label">% com cookie prévio</div>
+                <div className="value">{cookieRate}%</div>
+              </div>
+              <div className="metric">
+                <div className="label">% sem callback</div>
+                <div className="value">{noCb}%</div>
+              </div>
+              <div className="metric">
+                <div className="label">IP público</div>
+                <div className="value value-sm">{vq.publicIp || summary?.visits?.lastIp || '—'}</div>
+              </div>
+              <div className="metric">
+                <div className="label">privacy.type</div>
+                <div className={`value value-sm tone-${privacyTone}`}>
+                  {privacy || summary?.visits?.privacyType || '—'}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="label">Soft pause até</div>
+                <div className="value value-sm">
+                  {softUntil ? formatTs(new Date(softUntil).toISOString()) : '—'}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="label">p95 sessão (ms)</div>
+                <div className="value value-sm">
+                  {vq.sessionMsP95 ??
+                    summary?.visits?.sessionMsP95Native ??
+                    '—'}
+                </div>
+              </div>
+            </div>
+            <p className="muted" style={{ marginTop: 8 }}>
+              Soft cap {softCap} → pausa 1h. Hard {hardCap}/dia. Visitas serializadas (1 por vez) com gap 8–25s.
+            </p>
+          </section>
+        );
+      })()}
 
       <div className="panels">
         <section className="panel">

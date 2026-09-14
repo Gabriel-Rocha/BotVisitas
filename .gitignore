@@ -11,9 +11,15 @@ node_modules/
 config/local.*
 config/*.local.json
 config/secrets.*
+config/schedule.json
+config/visit-metrics.jsonl
+config/proxy-pool.json
 *.pem
 *.key
 credentials*.json
+
+# Perfis Chromium persistentes (1 worker = 1 identidade)
+profiles/
 
 # Runtime / logs
 logs/*

@@ -4,26 +4,42 @@ const { createWorker } = require('./worker');
 const { assignDeviceTypes, getProfile, summarizeDevices } = require('./devices');
 const { sleep } = require('../utils/sleep');
 const { createTuxlerLease, assertTuxlerReady, validateTuxlerActive } = require('./tuxler');
-const { FREE_PLAN_MAX, resetTuxlerSocksCache } = require('./proxy');
+const { FREE_PLAN_MAX, resetTuxlerSocksCache, readWindowsSystemProxy } = require('./proxy');
 const { clearGeoCache } = require('./geo');
 const { createMemoryWatch } = require('./memoryWatch');
+const { getCurrentPublicIp } = require('./ip');
+const { createVisitGate } = require('./visitGate');
 
 function resolveConcurrency(config, strategy, logger) {
-  const n = Math.max(1, Math.min(config.concurrency || 1, FREE_PLAN_MAX));
+  const egress = String(config.egress || 'tuxler-system').toLowerCase();
+  const hardCap = egress === 'native' ? 6 : FREE_PLAN_MAX;
+  const n = Math.max(1, Math.min(config.concurrency || 1, hardCap));
   const needsBrowser = strategy.requiresBrowser !== false;
-  const tuxlerOn = config.tuxler?.enabled;
-  const rotMode = (config.tuxler?.rotateMode || 'skip').toLowerCase();
 
-  if (needsBrowser && tuxlerOn && rotMode !== 'skip' && n > 1) {
-    logger.warn(
-      'Tuxler com rotação automática: workers competem pelo mesmo IP — prefira skip ou CONCURRENCY=1.'
+  if (needsBrowser && egress === 'native') {
+    logger.info(
+      `EGRESS=native | ${n} worker(s) pela placa de rede (ASN da operadora). Teto CONCURRENCY=6.`
     );
   }
 
-  if (needsBrowser && tuxlerOn && rotMode === 'skip' && n > 1) {
+  if (needsBrowser && egress === 'tuxler-system') {
     logger.info(
-      `Tuxler skip: ${n} workers em paralelo (mesmo IP VPN; cada um visita links à parte).`
+      `EGRESS=tuxler-system | ${n} worker(s) herdam proxy do Windows (estilo v1). ` +
+        `VISIT_SERIAL=${Boolean(config.visitSerial)} gap=${config.visitGapMinSec}-${config.visitGapMaxSec}s.`
     );
+  }
+
+  if (needsBrowser && egress === 'tuxler') {
+    const rotMode = (config.tuxler?.rotateMode || 'skip').toLowerCase();
+    if (rotMode === 'skip') {
+      logger.info(
+        `EGRESS=tuxler skip: ${n} workers (SOCKS explícito; mesmo IP VPN).`
+      );
+    } else {
+      logger.warn(
+        'EGRESS=tuxler com rotação automática: workers competem pelo mesmo túnel SOCKS.'
+      );
+    }
   }
 
   return n;
@@ -61,6 +77,7 @@ function createLoop({ config, strategy, logger }) {
   const startedAt = Date.now();
   let deviceSummary = {};
   const previewGate = createPreviewGate(2);
+  const visitGate = createVisitGate({ config, logger });
   let recycleInFlight = null;
   const memoryWatch = createMemoryWatch({
     logger,
@@ -90,7 +107,11 @@ function createLoop({ config, strategy, logger }) {
   }
 
   async function run() {
-    assertTuxlerReady(config, logger);
+    const egress = String(config.egress || 'tuxler-system').toLowerCase();
+
+    if (egress === 'tuxler') {
+      assertTuxlerReady(config, logger);
+    }
 
     const fallbackConcurrency = resolveConcurrency(config, strategy, logger);
 
@@ -98,24 +119,57 @@ function createLoop({ config, strategy, logger }) {
       workerSlotsRaw: config.workerSlots,
       deviceMixRaw: config.deviceMix,
       concurrency: fallbackConcurrency,
-      maxWorkers: undefined,
+      maxWorkers: egress === 'native' ? 6 : undefined,
       logger,
     });
 
     deviceSummary = summarizeDevices(types);
 
-    if (config.tuxler?.enabled && strategy.requiresBrowser !== false) {
+    if (egress === 'tuxler' && strategy.requiresBrowser !== false) {
       resetTuxlerSocksCache();
       clearGeoCache();
       await validateTuxlerActive(config, logger, { strategy });
       proxyLease = createTuxlerLease(config, logger);
       const rotMode = (config.tuxler?.rotateMode || 'skip').toLowerCase();
       if (rotMode === 'skip') {
-        logger.info('Tuxler: egress fixo — mantenha o app conectado; workers paralelos nos links');
+        logger.info('Tuxler SOCKS: mantenha o app conectado');
       } else {
         logger.info('Tuxler: rotação automática no acquire/restart do browser');
       }
+    } else if (egress === 'tuxler-system') {
+      proxyLease = null;
+      const sys = readWindowsSystemProxy();
+      if (!sys.enabled) {
+        logger.warn(
+          'EGRESS=tuxler-system mas ProxyEnable=0 no Windows — abra o Tuxler, conecte o país e aguarde o proxy do sistema.'
+        );
+      } else {
+        logger.info(
+          `EGRESS=tuxler-system | proxy Windows ON (${sys.server || '?'}) — Chromium herda (estilo v1)`
+        );
+      }
+      try {
+        const ip = await getCurrentPublicIp({ force: true });
+        logger.info(`IP público atual: ${ip}`);
+      } catch (err) {
+        logger.warn(`Não foi possível ler IP público: ${err.message}`);
+      }
+    } else if (egress === 'native') {
+      proxyLease = null;
+      try {
+        const ip = await getCurrentPublicIp({ force: true });
+        logger.info(`EGRESS=native | IP público ${ip} (placa de rede — sem SOCKS)`);
+      } catch (err) {
+        logger.warn(`EGRESS=native | não foi possível ler IP público: ${err.message}`);
+      }
     }
+
+    const cadence = visitGate.snapshot();
+    logger.info(
+      `Cadência | serial=${Boolean(config.visitSerial)} | gap=${config.visitGapMinSec}-${config.visitGapMaxSec}s | ` +
+        `burst a cada ${config.burstEveryHits} | soft=${config.hitSoftCapDay}/+${config.hitSoftPauseHours}h | hard=${config.hitHardCapDay} | ` +
+        `hoje=${cadence.hitsToday}`
+    );
 
     deviceSummary = summarizeDevices(types);
 
@@ -124,7 +178,7 @@ function createLoop({ config, strategy, logger }) {
       .join(', ');
 
     logger.info(
-      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | tuxler=${Boolean(config.tuxler?.enabled && proxyLease)} | restartEvery=${config.browserRestartEvery || 0}`
+      `Pool de workers | concurrency=${types.length} | devices={${mixLabel}} | strategy=${strategy.name} | egress=${egress} | restartEvery=${config.browserRestartEvery || 0}`
     );
     if (process.platform === 'win32') {
       logger.info(
@@ -142,6 +196,7 @@ function createLoop({ config, strategy, logger }) {
           strategy,
           logger,
           proxyLease,
+          visitGate,
           deviceType: type,
           deviceProfile: profile,
           preferredCountry: slots[i]?.country || null,
@@ -181,8 +236,10 @@ function createLoop({ config, strategy, logger }) {
 
   function getStats() {
     const parts = workers.map((w) => w.getStats());
+    const cadence = visitGate.snapshot();
     return {
       concurrency: workers.length,
+      egress: config.egress || 'tuxler-system',
       uptimeSec: Math.round((Date.now() - startedAt) / 1000),
       ok: parts.reduce((s, p) => s + p.ok, 0),
       offers: parts.reduce((s, p) => s + (p.offers || 0), 0),
@@ -193,7 +250,44 @@ function createLoop({ config, strategy, logger }) {
       browserRestarts: parts.reduce((s, p) => s + (p.browserRestarts || 0), 0),
       devices: deviceSummary,
       memory: memoryWatch.getSnapshot(),
+      cadence,
+      visitQuality: aggregateVisitQuality(parts, cadence),
       workers: parts,
+    };
+  }
+
+  function aggregateVisitQuality(parts, cadence) {
+    let withCookies = 0;
+    let withoutCallback = 0;
+    let sessions = 0;
+    let publicIp = null;
+    let privacyType = null;
+    const sessionMs = [];
+    for (const p of parts) {
+      const vq = p.visitQuality || {};
+      sessions += vq.sessions || 0;
+      withCookies += vq.withCookies || 0;
+      withoutCallback += vq.withoutCallback || 0;
+      if (vq.publicIp) publicIp = vq.publicIp;
+      if (vq.privacyType) privacyType = vq.privacyType;
+      if (Array.isArray(vq.sessionMs)) sessionMs.push(...vq.sessionMs);
+    }
+    sessionMs.sort((a, b) => a - b);
+    const p95 =
+      sessionMs.length > 0
+        ? sessionMs[Math.min(sessionMs.length - 1, Math.floor(sessionMs.length * 0.95))]
+        : null;
+    return {
+      sessions,
+      cookieRate: sessions ? Math.round((withCookies / sessions) * 1000) / 10 : 0,
+      noCallbackRate: sessions ? Math.round((withoutCallback / sessions) * 1000) / 10 : 0,
+      hitsToday: cadence?.hitsToday ?? 0,
+      hitCap: config.hitSoftCapDay ?? 1000,
+      hardCap: config.hitHardCapDay ?? 2500,
+      softPauseUntil: cadence?.softPauseUntil || null,
+      publicIp,
+      privacyType,
+      sessionMsP95: p95,
     };
   }
 

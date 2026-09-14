@@ -132,7 +132,7 @@ async function start(options = {}) {
   config = previewConfig;
   logger = createBufferedLogger(config.logLevel);
 
-  if (config.tuxler?.enabled && config.strategy !== 'dryRun') {
+  if (config.egress === 'tuxler' && config.strategy !== 'dryRun') {
     try {
       const strategy = resolveStrategy(config.strategy);
       await validateTuxlerActive(config, logger, { strategy });

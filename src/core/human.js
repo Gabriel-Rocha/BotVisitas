@@ -94,6 +94,87 @@ function clickPoint(viewport) {
   };
 }
 
+/**
+ * Escolhe elemento clicável real (área visível + posição no fluxo de leitura).
+ * Substitui clickPoint(coordenada aleatória) — clicar no centro DESTE elemento.
+ * @returns {Promise<{ x: number, y: number, selector?: string, text?: string, area?: number }|null>}
+ */
+async function findClickTarget(page) {
+  const target = await page.evaluate(() => {
+    const sel =
+      'a[href], button, [role="button"], input[type="submit"], input[type="button"], [onclick], .btn, .button, [data-cta]';
+    const nodes = [...document.querySelectorAll(sel)];
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    const scored = [];
+
+    for (const el of nodes) {
+      const r = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      if (r.width < 16 || r.height < 12) continue;
+      if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) {
+        continue;
+      }
+      if (r.bottom < 0 || r.top > vh) continue;
+      if (style.pointerEvents === 'none') continue;
+
+      const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 80);
+      const href = el.getAttribute('href') || '';
+      if (/privacy|terms|cookie|logout|mailto:|tel:/i.test(`${text} ${href}`)) continue;
+
+      const area = r.width * r.height;
+      const cy = r.top + r.height / 2;
+      // Fluxo de leitura: preferir terço superior-médio da viewport
+      const readingBonus = cy < vh * 0.55 ? 1.4 : cy < vh * 0.8 ? 1.0 : 0.6;
+      const centerX = r.left + r.width / 2;
+      const centerBias = 1 - Math.min(1, Math.abs(centerX - vw / 2) / (vw / 2)) * 0.3;
+      const score = area * readingBonus * centerBias;
+
+      scored.push({
+        x: Math.round(centerX),
+        y: Math.round(cy),
+        text,
+        area: Math.round(area),
+        score,
+        tag: el.tagName,
+      });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    if (!scored.length) return null;
+
+    // Ponderar entre os top-5 (não sempre o #1)
+    const top = scored.slice(0, 5);
+    const total = top.reduce((s, t) => s + t.score, 0);
+    let r = Math.random() * total;
+    for (const t of top) {
+      r -= t.score;
+      if (r <= 0) return t;
+    }
+    return top[0];
+  });
+
+  return target;
+}
+
+/**
+ * Pré-roll humano antes do clique: scroll até alvo, hover, pausa.
+ */
+async function preRollBeforeClick(page, target) {
+  if (!target) return;
+  try {
+    await page.evaluate((y) => {
+      window.scrollBy({ top: Math.max(0, y - window.innerHeight * 0.35), behavior: 'smooth' });
+    }, target.y);
+  } catch {
+    // ignore
+  }
+  await sleep(randomInt(200, 500));
+  await moveTo(page, target.x, target.y);
+  await sleep(randomInt(400, 900)); // hover
+  await sleep(randomInt(600, 1500)); // pausa intenção
+}
+
 module.exports = {
   moveTo,
   humanClick,
@@ -102,4 +183,6 @@ module.exports = {
   dwell,
   browseLikeHuman,
   clickPoint,
+  findClickTarget,
+  preRollBeforeClick,
 };

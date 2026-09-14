@@ -15,17 +15,23 @@ const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
  */
 
 /** Args extras do Chromium que reduzem fingerprint de bot (sem quebrar JS do site). */
-function getStealthLaunchArgs({ lang = 'pt-BR' } = {}) {
+function getStealthLaunchArgs({ lang = 'pt-BR', egress = 'native' } = {}) {
   const language = String(lang || 'pt-BR').trim() || 'pt-BR';
-  return [
+  const args = [
     '--disable-blink-features=AutomationControlled',
+    // Em EGRESS=native o WebRTC entrega o IP da máquina — que é o esperado.
     '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--enforce-webrtc-ip-permission-check',
+    // NÃO remover: em native, IPv4 e IPv6 são o mesmo assinante/ASN.
+    // Em SOCKS era fatal (vazamento ao lado do túnel); sem túnel é correto.
     '--disable-ipv6',
     `--lang=${language}`,
     '--disable-infobars',
   ];
+  // NÃO adicionar --host-resolver-rules em native: DNS da operadora é o esperado.
+  void egress;
+  return args;
 }
 
 /**
@@ -147,12 +153,20 @@ async function applyDeviceHints(page, { isMobile = false, hasTouch = false, user
  * - Suaviza chrome.runtime / permissions
  * - languages alinhados ao locale da região do IP
  */
-async function applyPageStealth(page, { languages = ['pt-BR', 'pt', 'en-US', 'en'] } = {}) {
+async function applyPageStealth(
+  page,
+  {
+    languages = ['pt-BR', 'pt', 'en-US', 'en'],
+    screenOffset = { x: 12, y: 28 },
+  } = {}
+) {
   const langs = Array.isArray(languages) && languages.length ? languages : ['pt-BR', 'pt', 'en-US', 'en'];
   const primary = langs[0];
+  const sx = Number.isFinite(screenOffset?.x) ? Math.round(screenOffset.x) : 12;
+  const sy = Number.isFinite(screenOffset?.y) ? Math.round(screenOffset.y) : 28;
 
   await page.evaluateOnNewDocument(
-    (langList, primaryLang) => {
+    (langList, primaryLang, screenXFixed, screenYFixed) => {
       try {
         Object.defineProperty(navigator, 'webdriver', {
           get: () => undefined,
@@ -259,18 +273,40 @@ async function applyPageStealth(page, { languages = ['pt-BR', 'pt', 'en-US', 'en
         // ignore
       }
 
-      // Viewability: pixels de ads não disparam com document.hidden / aba sem foco.
+      // Viewability: correção SUAVE — só mentir se hidden E janela tem dimensões.
+      // Nunca forçar hidden=false permanente; nunca noop em blur; não mentir hasFocus.
       try {
+        const hiddenDesc =
+          Object.getOwnPropertyDescriptor(Document.prototype, 'hidden') ||
+          Object.getOwnPropertyDescriptor(document, 'hidden');
+        const visDesc =
+          Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState') ||
+          Object.getOwnPropertyDescriptor(document, 'visibilityState');
+        const realHidden = () =>
+          hiddenDesc?.get ? hiddenDesc.get.call(document) : document.hidden;
+        const realVis = () =>
+          visDesc?.get ? visDesc.get.call(document) : document.visibilityState;
+
         Object.defineProperty(document, 'hidden', {
-          get: () => false,
+          get: () => {
+            const h = realHidden();
+            if (h && (window.innerWidth > 0 || window.outerWidth > 0)) {
+              return false;
+            }
+            return h;
+          },
           configurable: true,
         });
         Object.defineProperty(document, 'visibilityState', {
-          get: () => 'visible',
+          get: () => {
+            const h = realHidden();
+            if (h && (window.innerWidth > 0 || window.outerWidth > 0)) {
+              return 'visible';
+            }
+            return realVis();
+          },
           configurable: true,
         });
-        document.hasFocus = () => true;
-        window.blur = () => {};
         try {
           Object.defineProperty(document, 'prerendering', {
             get: () => false,
@@ -279,6 +315,20 @@ async function applyPageStealth(page, { languages = ['pt-BR', 'pt', 'en-US', 'en
         } catch {
           // ignore
         }
+        // Dispara visibilitychange coerente se corrigirmos hidden→visible no load.
+        document.addEventListener(
+          'DOMContentLoaded',
+          () => {
+            try {
+              if (realHidden() && (window.innerWidth > 0 || window.outerWidth > 0)) {
+                document.dispatchEvent(new Event('visibilitychange'));
+              }
+            } catch {
+              // ignore
+            }
+          },
+          { once: true }
+        );
       } catch {
         // ignore
       }
@@ -296,19 +346,19 @@ async function applyPageStealth(page, { languages = ['pt-BR', 'pt', 'en-US', 'en
           configurable: true,
         });
         Object.defineProperty(window, 'screenX', {
-          get: () => 12,
+          get: () => screenXFixed,
           configurable: true,
         });
         Object.defineProperty(window, 'screenY', {
-          get: () => 28,
+          get: () => screenYFixed,
           configurable: true,
         });
         Object.defineProperty(window, 'screenLeft', {
-          get: () => 12,
+          get: () => screenXFixed,
           configurable: true,
         });
         Object.defineProperty(window, 'screenTop', {
-          get: () => 28,
+          get: () => screenYFixed,
           configurable: true,
         });
       } catch {
@@ -316,7 +366,9 @@ async function applyPageStealth(page, { languages = ['pt-BR', 'pt', 'en-US', 'en
       }
     },
     langs,
-    primary
+    primary,
+    sx,
+    sy
   );
 }
 
@@ -1125,8 +1177,77 @@ async function humanEngage(
 }
 
 /**
+ * Cliques com intenção — elemento real (findClickTarget) + pré-roll.
+ * legacyCenterClicks mantido só para CLICK_MODE=legacy explícito.
+ */
+async function intentionalClicks(page, config, logger, { count, followRedirects = true } = {}) {
+  const { findClickTarget, preRollBeforeClick, humanClick } = require('./human');
+  const cap = Math.max(0, config?.maxClicksPerPage ?? 1);
+  const n = Math.max(0, Math.min(cap, count ?? 1));
+  if (n <= 0) {
+    return { clicks: [], clickCount: 0, verifiedCount: 0, timeToFirstClickMs: null };
+  }
+
+  const clicks = [];
+  const started = Date.now();
+  let timeToFirstClickMs = null;
+
+  for (let i = 0; i < n; i += 1) {
+    const target = await findClickTarget(page);
+    if (!target) {
+      logger?.warn?.('findClickTarget: nenhum elemento clicável — pulando clique');
+      break;
+    }
+    try {
+      await preRollBeforeClick(page, target);
+      await humanClick(page, target.x, target.y);
+      if (timeToFirstClickMs == null) timeToFirstClickMs = Date.now() - started;
+      clicks.push({
+        via: 'intentional-element',
+        verified: true,
+        performed: true,
+        index: i + 1,
+        x: target.x,
+        y: target.y,
+        text: target.text || '',
+      });
+      logger?.info?.(
+        `Clique intencional (${target.x},${target.y}) "${(target.text || '').slice(0, 40)}"`
+      );
+    } catch (err) {
+      logger?.warn?.(`Clique ${i + 1}/${n} falhou: ${err.message}`);
+    }
+    if (i < n - 1) await sleep(randomInt(400, 1200));
+  }
+
+  if (followRedirects && clicks.length) {
+    try {
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8_000 }),
+        sleep(1_500),
+      ]);
+    } catch {
+      // soft
+    }
+    await followClientRedirects(page, logger, { maxHops: 4 });
+  }
+
+  const finalUrl = page.url();
+  for (const hit of clicks) {
+    hit.finalUrl = finalUrl;
+  }
+
+  return {
+    clicks,
+    clickCount: clicks.length,
+    verifiedCount: clicks.length,
+    timeToFirstClickMs,
+  };
+}
+
+/**
  * Cliques no centro — fluxo original v1 (page.mouse.click após goto).
- * Cada worker executa os seus próprios cliques; contabiliza o que foi disparado.
+ * Deprecated como default; use intentionalClicks / hybrid.
  */
 async function legacyCenterClicks(page, config, logger, { count, followRedirects = true } = {}) {
   const vp = page.__botViewport || {
@@ -1140,7 +1261,7 @@ async function legacyCenterClicks(page, config, logger, { count, followRedirects
   const max = Math.max(min, config?.engageClicksMax ?? cap);
   const n = Math.max(1, count ?? randomInt(min, Math.min(cap, max)));
 
-  logger?.info?.(`Cliques no centro (${Math.round(x)},${Math.round(y)}): ${n} [v1]`);
+  logger?.info?.(`Cliques no centro (${Math.round(x)},${Math.round(y)}): ${n} [v1-legacy]`);
 
   const clicks = [];
   for (let i = 0; i < n; i += 1) {
@@ -1374,6 +1495,7 @@ module.exports = {
   humanBrowsePause,
   followClientRedirects,
   humanEngage,
+  intentionalClicks,
   legacyCenterClicks,
   legacyViewportClick,
   navigateLikeHuman,

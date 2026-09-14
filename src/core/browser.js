@@ -12,6 +12,15 @@ puppeteer.use(StealthPlugin());
 const SYSTEM_CHROME_CANDIDATES = [
   process.env.CHROME_EXECUTABLE_PATH,
   process.env.PUPPETEER_EXECUTABLE_PATH,
+  process.platform === 'win32'
+    ? `${process.env.PROGRAMFILES || 'C:\\Program Files'}\\Google\\Chrome\\Application\\chrome.exe`
+    : null,
+  process.platform === 'win32'
+    ? `${process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)'}\\Google\\Chrome\\Application\\chrome.exe`
+    : null,
+  process.platform === 'win32'
+    ? `${process.env.LOCALAPPDATA || ''}\\Google\\Chrome\\Application\\chrome.exe`
+    : null,
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome',
@@ -28,10 +37,23 @@ function resolveChromePath(configured) {
 }
 
 /**
+ * Resolve args de egresso.
+ * tuxler → SOCKS explícito; native → --no-proxy-server;
+ * tuxler-system → [] (herda Windows).
+ */
+async function resolveEgressLaunchArgs(config, logger, activeProxy) {
+  const mode = String(config.egress || 'native').toLowerCase();
+  if (mode === 'tuxler') {
+    return getTuxlerLaunchArgs(logger, config);
+  }
+  return getProxyLaunchArgs(config, activeProxy);
+}
+
+/**
  * @param {object} config
  * @param {object} logger
  * @param {object|null} [forcedProxy] — proxy já adquirido pelo worker (lease exclusivo)
- * @param {{ lang?: string }} [stealthOpts]
+ * @param {{ lang?: string, userDataDir?: string }} [stealthOpts]
  */
 async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {}) {
   const activeProxy = forcedProxy || null;
@@ -39,9 +61,9 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     logger.info(`Proxy selecionado: ${activeProxy.label}`);
   }
 
-  const proxyArgs = config.tuxler?.enabled
-    ? await getTuxlerLaunchArgs(logger, config)
-    : getProxyLaunchArgs(activeProxy);
+  const proxyArgs = await resolveEgressLaunchArgs(config, logger, activeProxy);
+  const egress = String(config.egress || 'native').toLowerCase();
+  logger.info(`Egress=${egress} | launchArgs proxy: ${proxyArgs.join(' ') || '(nenhum)'}`);
 
   const processLimit = Math.max(1, config.chromeProcessLimit || 1);
   const args = [
@@ -61,7 +83,7 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     '--no-default-browser-check',
     '--mute-audio',
     `--renderer-process-limit=${processLimit}`,
-    ...getStealthLaunchArgs({ lang: stealthOpts.lang }),
+    ...getStealthLaunchArgs({ lang: stealthOpts.lang, egress }),
     ...proxyArgs,
   ];
 
@@ -73,6 +95,12 @@ async function launchBrowser(config, logger, forcedProxy = null, stealthOpts = {
     // Necessário com vários proxies HTTP (CONNECT / cert / handshake).
     ignoreHTTPSErrors: true,
   };
+
+  if (stealthOpts.userDataDir) {
+    fs.mkdirSync(stealthOpts.userDataDir, { recursive: true });
+    options.userDataDir = stealthOpts.userDataDir;
+    logger.info(`Perfil persistente: ${stealthOpts.userDataDir}`);
+  }
 
   const chromePath = resolveChromePath(config.chromeExecutablePath);
   if (chromePath) {

@@ -257,6 +257,22 @@ function toTuxlerSlot(geo) {
 const EGRESS_REFRESH_MS = 30_000;
 
 function createTuxlerLease(config, logger) {
+  // EGRESS!=tuxler: lease é no-op explícito — nenhum byte passa pelo SOCKS.
+  if (String(config.egress || 'native').toLowerCase() !== 'tuxler') {
+    logger?.info?.('createTuxlerLease: no-op (EGRESS≠tuxler)');
+    return {
+      size: 0,
+      availableCount() {
+        return 0;
+      },
+      async acquire() {
+        return null;
+      },
+      release() {},
+      refreshEgress() {},
+    };
+  }
+
   const skip = (config.tuxler?.rotateMode || 'skip').toLowerCase() === 'skip';
   let cachedEgress = null;
   let cachedAt = 0;
@@ -343,11 +359,12 @@ function createTuxlerLease(config, logger) {
 }
 
 function assertTuxlerReady(config, logger) {
+  if (String(config.egress || 'native').toLowerCase() !== 'tuxler') return;
   if (!config.tuxler?.enabled) return;
 
   if (!isWindows()) {
     throw new Error(
-      'TUXLER_ENABLED=true mas o SO não é Windows. Desligue TUXLER_ENABLED ou use Windows com TuxlerVPN.'
+      'EGRESS=tuxler mas o SO não é Windows. Use EGRESS=native ou rode em Windows com TuxlerVPN.'
     );
   }
 
@@ -359,8 +376,13 @@ function assertTuxlerReady(config, logger) {
 /**
  * Gate obrigatório: SOCKS online + egress medido via túnel.
  * Lança TuxlerInactiveError se Tuxler não estiver roteando.
+ * SOMENTE quando EGRESS=tuxler.
  */
 async function validateTuxlerActive(config, logger, { strategy = null } = {}) {
+  if (String(config.egress || 'native').toLowerCase() !== 'tuxler') {
+    return { ok: true, skipped: true, reason: 'egress-not-tuxler' };
+  }
+
   if (!config.tuxler?.enabled) {
     return { ok: true, skipped: true, reason: 'tuxler-disabled' };
   }

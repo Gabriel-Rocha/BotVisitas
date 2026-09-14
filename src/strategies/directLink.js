@@ -1,6 +1,6 @@
 'use strict';
 
-const { pick, randomInt } = require('../utils/random');
+const { pick, randomInt, chance } = require('../utils/random');
 const { sleep, sleepInterruptible, isAbortError } = require('../utils/sleep');
 const { isTransientProxyError } = require('../utils/netErrors');
 const { isHeavyOfferHost } = require('../core/bandwidth');
@@ -13,6 +13,7 @@ const {
 const {
   humanBrowsePause,
   humanEngage,
+  intentionalClicks,
   legacyCenterClicks,
   followClientRedirects,
   navigateLikeHuman,
@@ -91,39 +92,49 @@ async function collectInternalLinks(page, hostname) {
 }
 
 function resolveClickBudget(config) {
-  const mode = resolveClickMode(config);
   const cap = Math.max(0, config.maxClicksPerPage ?? 1);
-  if (cap === 0) return 0;
+  if (cap === 0 || config.engageEnabled === false) return 0;
 
-  if (mode === 'legacy' || mode === 'hybrid') {
-    const min = Math.max(1, config.engageClicksMin ?? 1);
-    const max = Math.max(min, config.engageClicksMax ?? Math.min(3, cap));
-    return Math.min(cap, randomInt(min, max));
+  // Humano nem sempre clica — default 25% zero cliques
+  const zeroChance = Number(config.zeroClickChance ?? 0.25);
+  if (zeroChance > 0 && chance(zeroChance)) return 0;
+
+  const mode = resolveClickMode(config);
+  const min = Math.max(0, config.engageClicksMin ?? 0);
+  const max = Math.max(min, Math.min(cap, config.engageClicksMax ?? 1));
+  if (max <= 0) return 0;
+  if (mode === 'legacy') {
+    return Math.min(cap, Math.max(1, randomInt(Math.max(1, min || 1), max)));
   }
-
-  if (config.engageEnabled === false) return 0;
-  const min = Math.max(0, config.engageClicksMin ?? 1);
-  const max = Math.max(min, config.engageClicksMax ?? Math.min(3, cap));
+  // Após o roll de zero: 1 clique (orçamento padrão anti-IVT)
+  if (min === 0) return Math.min(cap, 1);
   return Math.min(cap, randomInt(min, max));
 }
 
 async function runEngagement(page, config, logger, ctx, { onIntermediate, budget, fast }) {
   const mode = resolveClickMode(config);
-  let engage = { clicks: [], clickCount: 0, verifiedCount: 0 };
+  let engage = { clicks: [], clickCount: 0, verifiedCount: 0, timeToFirstClickMs: null };
 
   if (onIntermediate || budget <= 0) {
     return engage;
   }
 
-  // v1 primeiro: clique no centro logo após a página carregar (cada worker, N vezes).
-  if (mode === 'legacy' || mode === 'hybrid') {
+  // Default hybrid: clique em elemento real com pré-roll (não centro cego).
+  if (mode === 'hybrid' || mode === 'intentional') {
+    engage = await intentionalClicks(page, config, logger, {
+      count: budget,
+      followRedirects: true,
+    });
+    if (engage.clickCount > 0) return engage;
+    // fallback engage CTR
+  }
+
+  if (mode === 'legacy') {
     engage = await legacyCenterClicks(page, config, logger, {
       count: budget,
       followRedirects: true,
     });
-    if (mode === 'legacy' || engage.clickCount > 0) {
-      return engage;
-    }
+    return engage;
   }
 
   logger.info(`Engajando página (até ${budget} click(s) CTR verificados)...`);
@@ -141,9 +152,9 @@ async function runEngagement(page, config, logger, ctx, { onIntermediate, budget
 }
 
 function resolveClickMode(config) {
-  const raw = (config.clickMode || 'legacy').trim().toLowerCase();
-  if (['legacy', 'engage', 'hybrid'].includes(raw)) return raw;
-  return 'legacy';
+  const raw = (config.clickMode || 'hybrid').trim().toLowerCase();
+  if (['legacy', 'engage', 'hybrid', 'intentional'].includes(raw)) return raw;
+  return 'hybrid';
 }
 
 async function browsePage(page, url, logger, label, config, opts = {}) {
@@ -227,6 +238,7 @@ async function browsePage(page, url, logger, label, config, opts = {}) {
     clicks: engage.clicks,
     clickCount: engage.clickCount,
     verifiedClicks: performedClicks,
+    timeToFirstClickMs: engage.timeToFirstClickMs ?? null,
     ...meta,
   };
 }
@@ -311,6 +323,11 @@ async function runSingleVisit(page, { config, logger, entryUrl, shouldStop, sign
     clicks: allClicks,
   });
 
+  const hostsSeen = [...new Set(path.map((u) => hostOf(u)).filter(Boolean))];
+  const callbackAdsterra = hostsSeen.some((h) =>
+    /profitablerate|al5sm|playmogo|show-sb|effectivecpm|adsterra|arbuz|clksite|onclicka/i.test(h)
+  );
+
   return {
     ok: true,
     quality,
@@ -327,6 +344,10 @@ async function runSingleVisit(page, { config, logger, entryUrl, shouldStop, sign
       clickCount: performedClicks,
       verifiedClicks: performedClicks,
       clicks: allClicks.slice(0, 20),
+      timeToFirstClickMs: first.timeToFirstClickMs ?? null,
+      hostsSeen,
+      callbackAdsterra,
+      hasCallback: callbackAdsterra,
     },
   };
 }

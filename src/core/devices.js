@@ -215,7 +215,8 @@ function summarizeDevices(types) {
 }
 
 /**
- * Escolhe viewport + UA coerentes com o perfil (troca a cada sessão/aba).
+ * Escolhe viewport + UA coerentes com o perfil.
+ * Deve ser chamado UMA vez em createWorker — nunca por visita.
  */
 function pickSessionPersona(profile) {
   if (!profile) {

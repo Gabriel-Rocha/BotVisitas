@@ -184,10 +184,11 @@ async function getMetricsSummary() {
       byStatus: {},
       last24h: null,
       recent: [],
+      visits: null,
     };
   }
 
-  const [totalsRes, statusRes, dayRes, recentRes] = await Promise.all([
+  const [totalsRes, statusRes, dayRes, recentRes, visitRes] = await Promise.all([
     query(
       `SELECT
          COUNT(*)::int AS runs,
@@ -218,6 +219,42 @@ async function getMetricsSummary() {
        ORDER BY started_at DESC
        LIMIT 8`
     ),
+    query(
+      `SELECT
+         COUNT(*)::int AS sessions,
+         COUNT(*) FILTER (WHERE (payload->>'cookies_presentes')::boolean IS TRUE)::int AS with_cookies,
+         COUNT(*) FILTER (
+           WHERE (payload->>'callback_adsterra_disparou')::boolean IS NOT TRUE
+             AND (payload->>'ok')::boolean IS TRUE
+         )::int AS without_callback,
+         COUNT(*) FILTER (
+           WHERE (payload->>'public_ip') IS NOT NULL
+             AND captured_at::date = CURRENT_DATE
+         )::int AS hits_today,
+         percentile_cont(0.95) WITHIN GROUP (
+           ORDER BY NULLIF(payload->>'tempo_sessao_ms','')::float
+         ) FILTER (WHERE payload->>'egress_mode' = 'native') AS p95_native,
+         percentile_cont(0.95) WITHIN GROUP (
+           ORDER BY NULLIF(payload->>'tempo_sessao_ms','')::float
+         ) FILTER (WHERE payload->>'egress_mode' = 'tuxler') AS p95_tuxler,
+         (
+           SELECT payload->>'public_ip'
+           FROM visit_metrics
+           WHERE captured_at >= now() - interval '24 hours'
+           ORDER BY captured_at DESC
+           LIMIT 1
+         ) AS last_ip,
+         (
+           SELECT payload->>'privacy_type'
+           FROM visit_metrics
+           WHERE captured_at >= now() - interval '24 hours'
+             AND payload->>'privacy_type' IS NOT NULL
+           ORDER BY captured_at DESC
+           LIMIT 1
+         ) AS privacy_type
+       FROM visit_metrics
+       WHERE captured_at >= now() - interval '7 days'`
+    ).catch(() => ({ rows: [{}] })),
   ]);
 
   const totals = totalsRes.rows[0] || {};
@@ -226,6 +263,8 @@ async function getMetricsSummary() {
     byStatus[row.status] = row.count;
   }
   const last24h = dayRes.rows[0] || {};
+  const v = visitRes.rows[0] || {};
+  const sessions = v.sessions || 0;
 
   return {
     available: true,
@@ -244,7 +283,51 @@ async function getMetricsSummary() {
       iterations: last24h.iterations || 0,
     },
     recent: recentRes.rows,
+    visits: {
+      sessions,
+      cookieRate: sessions
+        ? Math.round(((v.with_cookies || 0) / sessions) * 1000) / 10
+        : 0,
+      noCallbackRate: sessions
+        ? Math.round(((v.without_callback || 0) / sessions) * 1000) / 10
+        : 0,
+      hitsToday: v.hits_today || 0,
+      lastIp: v.last_ip || null,
+      privacyType: v.privacy_type || null,
+      sessionMsP95Native: v.p95_native != null ? Math.round(Number(v.p95_native)) : null,
+      sessionMsP95Tuxler: v.p95_tuxler != null ? Math.round(Number(v.p95_tuxler)) : null,
+    },
   };
+}
+
+/**
+ * Persiste métricas por visita (Fase 5). Best-effort se banco offline.
+ */
+async function insertVisitMetric(payload, runId = null) {
+  // Sempre grava JSONL local (funciona sem Postgres)
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.join(process.cwd(), 'config');
+    fs.mkdirSync(dir, { recursive: true });
+    const line = `${JSON.stringify({ ...payload, run_id: runId, ts: new Date().toISOString() })}\n`;
+    fs.appendFileSync(path.join(dir, 'visit-metrics.jsonl'), line, 'utf8');
+  } catch {
+    // ignore disk errors
+  }
+
+  if (!isAvailable()) return null;
+  try {
+    const result = await query(
+      `INSERT INTO visit_metrics (run_id, payload)
+       VALUES ($1, $2::jsonb)
+       RETURNING id, captured_at`,
+      [runId, JSON.stringify(payload || {})]
+    );
+    return result.rows[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 module.exports = {
@@ -257,5 +340,6 @@ module.exports = {
   listRunLogs,
   listRunSnapshots,
   getMetricsSummary,
+  insertVisitMetric,
   assertUuid,
 };

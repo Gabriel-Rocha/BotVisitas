@@ -12,14 +12,14 @@
 |---|----------|-------|
 | 1 | Escopo | Reescrita do zero; colaborativo + multi-dispositivo |
 | 2 | Direct Link | **default = directLink** |
-| 3 | Proxies | Tuxler gratuito (Windows) ou lista HTTP via env |
+| 3 | Proxies | **`EGRESS=tuxler-system`** (default) — herda proxy Windows; `native` / `tuxler` / `http-pool` disponíveis |
 | 4 | JS | **CommonJS** |
 | 5 | Chromium | Chrome do sistema (autodetect) ou Puppeteer; opcional `CHROME_EXECUTABLE_PATH` |
 | 6 | Blog / GH Pages / fetch | Fora do v1 |
 | 7 | Headless | `HEADLESS=true` default; `start:headed` p/ debug |
-| 8 | Intervalo | Default rápido `5–12s` (`INTERVAL_*`); `0` = sem pausa |
+| 8 | Intervalo | Fila serial + `VISIT_GAP_*` + burst/soft/hard cap; `INTERVAL_*` só jitter |
 | 9 | Restart do browser | Default 0 (nunca), configurável via env |
-| 10 | Stealth | Ligado por default; visitante novo a cada visita |
+| 10 | Stealth | Identidade persistente por worker (`profiles/wN`); sem anonimato por visita |
 
 ---
 
@@ -113,6 +113,25 @@
 
 ---
 
+## Anti-IVT / EGRESS (2026-09)
+
+- [x] `EGRESS=native|tuxler|tuxler-system|http-pool` — flag mestre
+- [x] `tuxler-system` — herda proxy Windows (estilo v1), sem SOCKS explícito
+- [x] `--no-proxy-server` em native (bloqueia ProxyEnable do Windows/Tuxler)
+- [x] Tuxler SOCKS só quando `EGRESS=tuxler`
+- [x] Persona 1× por worker + `userDataDir` em `profiles/wN`
+- [x] Popup linger `POPUP_LINGER_MS` (não fecha na chegada)
+- [x] Fila serial `VISIT_SERIAL` + gap/burst/soft/hard em `schedule.json`
+- [x] Clique intencional (`findClickTarget`) + orçamento 0–1
+- [x] Patches soft: hidden/blur/screenX por worker
+- [x] `src/core/ip.js` + `visitGate.js` + `scripts/reconnect.ps1`
+- [x] Instrumentação `visit_metrics` + MetricsPanel
+- [x] TESTE 0 — native egress (opcional)
+- [ ] TESTE 1 — A/B native vs tuxler-system
+- [ ] TESTE 4 — 3 dias no painel Adsterra
+
+---
+
 ## Anti-padrões
 
 - Hardcodar secrets/URLs
@@ -122,3 +141,7 @@
 - Pastas fora da arquitetura documentada
 - Expor automação / IP real (regressão de ofuscação) — ver `docs/11-ofuscacao.md`
 - UAs de outro motor (Firefox/Safari) no Chromium
+- Forçar `--proxy-server=socks5://…` como default (usar `tuxler-system`)
+- Fechar popunder na chegada
+- Rajada sem `VISIT_SERIAL` / gap
+- Subir CONCURRENCY > 6 em EGRESS=native
